@@ -1,0 +1,38 @@
+{
+  "id": 67890,
+  "title": "Очень странные дела",
+  "original_title": "Stranger Things",
+  "year": 2016,
+  "section": 7,
+  "player_links": {
+    "playlist": {
+      "1": {
+        "Дубляж (Невафильм)": {
+          "1": {
+            "link": "https://cdn2.example.com/st/s1e1_neva_[1080,720].mp4",
+            "qualities": [1080, 720]
+          },
+          "2": {
+            "link": "https://cdn2.example.com/st/s1e2_neva_[1080,720].mp4",
+            "qualities": [1080, 720]
+          }
+        },
+        "Оригинал (EN)": {
+          "1": {
+            "link": "https://cdn2.example.com/st/s1e1_orig_[2160,1080,720].mp4"
+          },
+          "2": {
+            "link": "https://cdn2.example.com/st/s1e2_orig_[2160,1080,720].mp4"
+          }
+        }
+      },
+      "2": {
+        "Дубляж (Невафильм)": {
+          "1": {
+            "link": "https://cdn2.example.com/st/s2e1_neva_[1080,720].mp4"
+          }
+        }
+      }
+    }
+  }
+}

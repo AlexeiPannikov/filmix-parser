@@ -1,0 +1,24 @@
+{
+  "id": 11111,
+  "title": "Тестовый сериал",
+  "original_title": "Test Series",
+  "year": 2020,
+  "section": 7,
+  "player_links": {
+    "playlist": {
+      "1": {
+        "Дубляж": [
+          {
+            "link": "https://cdn3.example.com/ts/s1e1_dub_[1080,720,480].mp4"
+          },
+          {
+            "link": "https://cdn3.example.com/ts/s1e2_dub_[1080,720,480].mp4"
+          },
+          {
+            "link": "https://cdn3.example.com/ts/s1e3_dub_[1080,720,480].mp4"
+          }
+        ]
+      }
+    }
+  }
+}

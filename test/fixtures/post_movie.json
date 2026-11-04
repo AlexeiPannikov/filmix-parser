@@ -1,0 +1,21 @@
+{
+  "id": 12345,
+  "title": "Интерстеллар",
+  "original_title": "Interstellar",
+  "year": 2014,
+  "section": 0,
+  "player_links": {
+    "movie": [
+      {
+        "translation": "Дубляж (Кубик в кубе)",
+        "link": "https://cdn1.example.com/file/inter_dub_[1080,720,480].mp4"
+      },
+      {
+        "translation": "Оригинал (EN)",
+        "link": "https://cdn1.example.com/file/inter_orig_[2160,1440,1080,720,480].mp4"
+      }
+    ],
+    "playlist": [],
+    "trailer": []
+  }
+}

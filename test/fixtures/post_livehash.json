@@ -1,0 +1,15 @@
+{
+  "id": "171042",
+  "title": "Reference",
+  "original_title": "Reference",
+  "year": "2010",
+  "section": "0",
+  "player_links": {
+    "movie": [
+      {
+        "translation": "Default",
+        "link": "https://cdn4.example.com/s/abc123def456/file_[1080,720,480].mp4"
+      }
+    ]
+  }
+}
