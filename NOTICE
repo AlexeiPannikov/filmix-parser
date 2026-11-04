@@ -1,5 +1,0 @@
-filmix-ts is a TypeScript port of github.com/n0madic/go-filmix.
-
-The original Go implementation is MIT-licensed; its license text is reproduced
-in LICENSE and applies to this derivative work as well. Algorithms, protocol
-knowledge and test fixtures are carried over from that project.

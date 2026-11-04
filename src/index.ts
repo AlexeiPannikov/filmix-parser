@@ -1,8 +1,8 @@
 /**
- * filmix-ts — a TypeScript port of `github.com/n0madic/go-filmix`.
+ * filmix-parser — a Filmix client for TypeScript.
  *
- * The public surface mirrors the Go root package: a {@link Client} facade plus
- * the models, errors and sub-clients it is built from.
+ * The public surface is a {@link Client} facade plus the models, errors and
+ * sub-clients it is built from.
  */
 export { Client, pickPlaylistFile } from './filmix.js';
 export type { ResolveRequest, ResolvedLinks, ResolvedTranslation } from './filmix.js';

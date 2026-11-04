@@ -1,8 +1,8 @@
 # filmix-parser
 
-TypeScript port of [`n0madic/go-filmix`](https://github.com/n0madic/go-filmix), reduced to what we
-need: searching Filmix, reading post metadata, and **resolving direct CDN links for every
-translation**. Media transfer is deliberately out of scope — there is no downloader.
+A Filmix client for TypeScript: searching, reading post metadata, and **resolving direct CDN
+links for every translation**. Media transfer is deliberately out of scope — there is no
+downloader.
 
 Zero runtime dependencies: the global `fetch`, `node:fs`, `node:crypto` and `node:util` cover
 everything the Go version got from the standard library.
@@ -108,8 +108,7 @@ Fallback, needs no credentials.
 
 ## Critical non-obvious knowledge
 
-Carried over from the Go implementation; these reflect empirical findings, not things derivable
-from the code.
+These reflect empirical findings about how Filmix behaves, not things derivable from the code.
 
 ### `#2` decoder
 
@@ -188,12 +187,12 @@ binding is server-side, keyed by the cookies set during the priming GET.
 `/api/v2/post/171042` and rewrites the `/s/{hash}/` prefix of resolved URLs — only useful for the
 mobile path when CDN URLs go stale.
 
-## Differences from the Go implementation
+## Design notes
 
-Behavioural parity was the goal for everything that was ported; these are the deliberate
-deviations.
+Decisions worth knowing when reading the code, contrasted with the Go client this project took
+its protocol knowledge from.
 
-| Area | Go | TypeScript |
+| Area | Go client | this project |
 | --- | --- | --- |
 | Download | `download/` package, `Client.Download`, CLI `download` | **removed** — `Client.resolveLinks` returns the CDN URLs instead |
 | Quality cap | 720p site / 480p guest / plan cap, enforced on download | none: every advertised quality is returned |
@@ -213,9 +212,8 @@ deviations.
 | Token redaction | `user_dev_token=%2A%2A%2A` | `user_dev_token=***` (URLSearchParams does not escape `*`) |
 | String sorting | UTF-8 byte order | UTF-16 code-unit order (identical for all BMP text) |
 
-Also dropped with the downloader: resumable transfers, `.part` files, progress reporting,
-destination derivation and the episode-range CLI flags (`--episodes`, `--output`). The Go
-module's `golang.org/x/term` dependency is replaced by a `node:readline` password prompt.
+Dropped along with the downloader: resumable transfers, `.part` files, progress reporting,
+destination derivation and the episode-range CLI flags (`--episodes`, `--output`).
 
 ## Layout
 
@@ -232,5 +230,11 @@ src/
   site/             website path: player-data, #2 decoder, manifest playlist
   internal/         HTTP plumbing, cookie jar, device id, timers
   cli/              the `filmix` command
-test/               vitest suites, fixtures shared with the Go repo's client/testdata
+test/               vitest suites and JSON fixtures
 ```
+
+## Acknowledgements
+
+Built under the inspiration of [`n0madic/go-filmix`](https://github.com/n0madic/go-filmix) — that
+project showed how the Filmix endpoints, the `#2` payload obfuscation and the two routes to a CDN
+link fit together, and this implementation grew out of studying it. Thanks to its author.

@@ -1,7 +1,7 @@
 {
   "name": "filmix-parser",
   "version": "1.0.0",
-  "description": "TypeScript port of n0madic/go-filmix: Filmix search, post metadata and direct CDN link resolution (no media download)",
+  "description": "Filmix client for TypeScript: search, post metadata and direct CDN link resolution",
   "license": "MIT",
   "type": "module",
   "engines": {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The reference CLI for filmix-ts. It exposes the four operations that make up
+ * The reference CLI for filmix-parser. It exposes the four operations that make up
  * the typical user flow:
  *
  * ```
