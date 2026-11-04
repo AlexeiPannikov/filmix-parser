@@ -15,7 +15,13 @@
  *    URLs for every available quality.
  */
 import type { PasswordAuthenticator } from '../auth/password.js';
-import { FilmixError, HttpStatusError, NotAuthorizedError, WarmUpFailedError } from '../errors.js';
+import {
+  FilmixError,
+  HttpStatusError,
+  NotAuthorizedError,
+  WarmUpFailedError,
+  isErrorOfType,
+} from '../errors.js';
 import { errMessage, readTextLimited } from '../internal/http.js';
 import { decode } from './decoder.js';
 import { parsePlayerDataJson, type PlayerData } from './player-data.js';
@@ -76,6 +82,18 @@ export class SiteClient {
    * warm-up falls back to `/play/{id}` on the mirror.
    */
   private async playerDataAt(
+    postId: number,
+    pageUrl: string,
+    mirror: string,
+    opts: { signal?: AbortSignal },
+  ): Promise<PlayerData> {
+    return await this.retryStale(mirror, opts, () =>
+      this.playerDataOnce(postId, pageUrl, mirror, opts),
+    );
+  }
+
+  /** One warm-up plus player-data POST, with no session recovery. */
+  private async playerDataOnce(
     postId: number,
     pageUrl: string,
     mirror: string,
@@ -149,15 +167,17 @@ export class SiteClient {
       return { movie: new PlaylistFile({ qualities }) };
     }
 
-    const { res } = await this.auth.session.fetch(trimmed, {
-      headers: { ...this.auth.browserHeaders(), Accept: '*/*' },
-      ...(opts.signal ? { signal: opts.signal } : {}),
+    const body = await this.retryStale(trimmed, opts, async () => {
+      const { res } = await this.auth.session.fetch(trimmed, {
+        headers: { ...this.auth.browserHeaders(), Accept: '*/*' },
+        ...(opts.signal ? { signal: opts.signal } : {}),
+      });
+      if (res.status !== 200) {
+        await res.body?.cancel().catch(() => undefined);
+        throw new HttpStatusError(res.status, 'manifest');
+      }
+      return await readTextLimited(res, 8 * 1024 * 1024);
     });
-    if (res.status !== 200) {
-      await res.body?.cancel().catch(() => undefined);
-      throw new HttpStatusError(res.status, 'manifest');
-    }
-    const body = await readTextLimited(res, 8 * 1024 * 1024);
 
     let rawJson: string;
     try {
@@ -166,6 +186,42 @@ export class SiteClient {
       throw new FilmixError(`decode manifest: ${errMessage(err)}`, { cause: err });
     }
     return parsePlaylist(rawJson);
+  }
+
+  /**
+   * Runs `attempt`; on a stale-session failure re-primes the site cookies and
+   * runs it exactly once more.
+   *
+   * The site's `minotaurs`/`x-a-key` cookies carry `Max-Age=3600`, so any
+   * session outlives them and starts collecting HTTP 403s. `host` is the host
+   * the attempt talks to: when it is not the configured mirror, the refreshed
+   * cookies are copied over to it as well.
+   *
+   * ponytail: blind single retry, no expiry bookkeeping — a re-prime is one GET
+   * and the 403 is the only reliable signal anyway. Read `Max-Age` in the jar
+   * and refresh pre-emptively if that extra GET ever shows up in a profile.
+   */
+  private async retryStale<T>(
+    host: string,
+    opts: { signal?: AbortSignal },
+    attempt: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await attempt();
+    } catch (err) {
+      if (!isSessionStale(err)) throw err;
+      await this.auth.prime(opts);
+      if (!sameHost(host, this.auth.mirror)) {
+        // Best-effort: a manifest served off a non-Filmix host cannot take the
+        // cookies, and the retry below is still worth attempting.
+        try {
+          this.auth.mirrorCookiesTo(host);
+        } catch {
+          // Keep the original failure meaningful by retrying regardless.
+        }
+      }
+      return await attempt();
+    }
   }
 
   /** GETs `target` so the session is primed, returning the post-redirect URL. */
@@ -211,4 +267,15 @@ export function sameHost(rawUrl: string, mirror: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Whether `err` looks like the site refusing a session rather than a genuine
+ * error: an outright HTTP 403, or a warm-up that did not come back 200.
+ * `WarmUpFailedError` does not carry the status, so it is treated as stale
+ * either way — the cost of being wrong is one extra GET.
+ */
+function isSessionStale(err: unknown): boolean {
+  if (isErrorOfType(err, WarmUpFailedError)) return true;
+  return isErrorOfType(err, HttpStatusError) && err.status === 403;
 }

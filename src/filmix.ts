@@ -184,11 +184,7 @@ export class Client {
     // non-fatal — the user simply needs to re-login.
     if (state.siteSession !== undefined && state.siteSession.cookies.length > 0) {
       try {
-        const pa = new PasswordAuthenticator({
-          http: this.http,
-          mirror: this.opts.mirror,
-          logger: this.log,
-        });
+        const pa = this.newSiteAuth();
         pa.restore(state.siteSession);
         this.passwordAuth = pa;
         this.site = new SiteClient(pa);
@@ -273,6 +269,38 @@ export class Client {
     return this.opts.mirror;
   }
 
+  /** Builds a website authenticator bound to this client's http and mirror. */
+  private newSiteAuth(): PasswordAuthenticator {
+    return new PasswordAuthenticator({
+      http: this.http,
+      mirror: this.opts.mirror,
+      logger: this.log,
+    });
+  }
+
+  /**
+   * Opens an **anonymous** website session: a priming GET on the mirror's
+   * homepage is all `/api/movies/player-data` needs, because the site gates it
+   * on the `minotaurs`/`x-a-key` cookies rather than on a user account.
+   *
+   * This lets {@link resolveLinks} take the site path — real URLs decoded from
+   * the `#2` manifests — with no credentials at all. A real login still sees
+   * more translations, so an existing session (restored or from
+   * {@link loginByPassword}) is kept and this call becomes a no-op.
+   *
+   * The session is deliberately not persisted: the cookies carry
+   * `Max-Age=3600` and the site client re-primes itself on an HTTP 403, so
+   * storing them would only age on disk.
+   */
+  async primeSite(opts: CallOptions = {}): Promise<void> {
+    await this.ensureBootstrap(opts);
+    if (this.site !== undefined) return;
+    const pa = this.newSiteAuth();
+    await pa.prime(opts);
+    this.passwordAuth = pa;
+    this.site = new SiteClient(pa);
+  }
+
   /**
    * Establishes a website session from a username/password instead of the
    * device-token flow. Useful when the user has already hit the device-binding
@@ -284,11 +312,7 @@ export class Client {
    */
   async loginByPassword(username: string, password: string, opts: CallOptions = {}): Promise<void> {
     await this.ensureBootstrap(opts);
-    const pa = new PasswordAuthenticator({
-      http: this.http,
-      mirror: this.opts.mirror,
-      logger: this.log,
-    });
+    const pa = this.newSiteAuth();
     await pa.login(username, password, opts);
 
     // Persist the site session so subsequent processes skip the login.

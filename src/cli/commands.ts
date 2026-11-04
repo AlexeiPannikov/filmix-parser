@@ -69,13 +69,13 @@ export async function cmdInfo(ctx: CommandContext, args: string[]): Promise<void
   }
 
   const [user, password] = resolveCredentials(values.user ?? '', values.password ?? '');
-  if (user !== '') await loginByPassword(ctx, user, password);
+  const source = parseSource(values.source ?? 'auto');
+  await openSiteSession(ctx, user, password, source);
 
   const { id, sourceUrl } = parseIdArgWithUrl(positionals[0]);
   const season = parsePositiveInt(values.season ?? '1', '--season');
   const episode = parsePositiveInt(values.episode ?? '1', '--episode');
   const translation = values.translation ?? '';
-  const source = parseSource(values.source ?? 'auto');
   const showLinks = (values.links ?? true) && !(values['no-links'] ?? false);
 
   const post = await ctx.client.getPost(id, { signal: ctx.signal });
@@ -165,8 +165,9 @@ export function printLinks(
     console.log('  Authorize first: `filmix login`, `filmix login --user X --password Y`,');
     console.log('  or `filmix session import --cookies cookies.json`.');
   } else {
-    console.log('  Note: a Free account gets the real file only up to 720p; above that the');
-    console.log('  CDN substitutes a ~13-second placeholder. Pro/Pro+ raise that ceiling.');
+    console.log('  Note: an anonymous or Free session gets the real file only up to 720p;');
+    console.log('  above that the CDN substitutes a ~13-second placeholder. Pro/Pro+ raise');
+    console.log('  that ceiling, so log in with --user/--password for the higher qualities.');
   }
 }
 
@@ -221,7 +222,8 @@ export async function cmdLinks(ctx: CommandContext, args: string[]): Promise<voi
   }
 
   const [user, password] = resolveCredentials(values.user ?? '', values.password ?? '');
-  if (user !== '') await loginByPassword(ctx, user, password);
+  const source = parseSource(values.source ?? 'auto');
+  await openSiteSession(ctx, user, password, source);
 
   const { id, sourceUrl } = parseIdArgWithUrl(positionals[0]);
   const post = await ctx.client.getPost(id, { signal: ctx.signal });
@@ -230,7 +232,7 @@ export async function cmdLinks(ctx: CommandContext, args: string[]): Promise<voi
     season: parsePositiveInt(values.season ?? '1', '--season'),
     episode: parsePositiveInt(values.episode ?? '1', '--episode'),
     translation: values.translation ?? '',
-    source: parseSource(values.source ?? 'auto'),
+    source,
     sourceUrl,
     signal: ctx.signal,
   });
@@ -354,6 +356,35 @@ export function resolveCredentials(user: string, password: string): [string, str
     user !== '' ? user : (process.env['FILMIX_USER'] ?? ''),
     password !== '' ? password : (process.env['FILMIX_PASS'] ?? ''),
   ];
+}
+
+/**
+ * Opens the website session the link resolver prefers.
+ *
+ * With credentials it is a real login; without, an anonymous priming GET,
+ * which is all `/api/movies/player-data` needs — so the site path (real
+ * manifest URLs) is the default even for a user who never logs in. Skipped for
+ * `--source mobile`, which never touches the website.
+ *
+ * A failure here is non-fatal: `resolveLinks` falls back to the mobile API's
+ * templates and `printLinks` explains what that means.
+ */
+async function openSiteSession(
+  ctx: CommandContext,
+  user: string,
+  password: string,
+  source: ResolveSource,
+): Promise<void> {
+  if (source === 'mobile') return;
+  if (user !== '') {
+    await loginByPassword(ctx, user, password);
+    return;
+  }
+  try {
+    await ctx.client.primeSite({ signal: ctx.signal });
+  } catch (err) {
+    process.stderr.write(`warning: could not open an anonymous site session: ${String(err)}\n`);
+  }
 }
 
 export async function loginByPassword(

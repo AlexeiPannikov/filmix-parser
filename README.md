@@ -35,10 +35,12 @@ for (const t of links.translations) {
 ```
 
 With a website session the URLs are decoded from the `#2` manifests; otherwise they are derived
-from the mobile API's `player_links` templates:
+from the mobile API's `player_links` templates. The site gates `player-data` on the cookies its
+homepage hands out, not on an account, so no credentials are needed — they just unlock more dubs:
 
 ```ts
-await client.loginByPassword('user', 'pass');         // → links.source === 'site'
+await client.primeSite();                             // → links.source === 'site', anonymous
+await client.loginByPassword('user', 'pass');         // → links.source === 'site', more dubs
 ```
 
 `resolveLinks` applies **no quality cap** — every advertised quality is returned and the caller
@@ -126,7 +128,8 @@ field names as the Go CLI, so the two can share a config file. Delete it to star
 
 ### Path A — website session (`src/site/`)
 
-Preferred, requires `loginByPassword`.
+Preferred. Needs `primeSite` (anonymous) or `loginByPassword`; the session re-primes itself
+when the hour-long site cookies expire and the server starts answering `403`.
 
 1. POST `/api/movies/player-data` → JSON with `translations.video` = `{name: "#2..."}` per dub.
 2. **Decode `#2` locally** (`site/decoder.ts`) → URL of a `.txt` manifest on `filmix.my/pl/...`.

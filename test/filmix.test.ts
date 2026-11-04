@@ -326,6 +326,41 @@ describe('resolveLinks — website path', () => {
     );
   });
 
+  it('primes an anonymous site session and keeps a real one', async () => {
+    let primes = 0;
+    const server = await serve((req, res) => {
+      void readBody(req).then(() => {
+        const path = new URL(req.url ?? '/', 'http://127.0.0.1').pathname;
+        if (path === '/') {
+          primes += 1;
+          res.writeHead(200);
+          res.end('<html></html>');
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('{"version":"1.0"}');
+      });
+    });
+
+    const client = new Client({
+      apiBase: `${server.url}/api/v2`,
+      mirror: server.url,
+      tokenStore: new MemoryStore(),
+    });
+    expect(client.siteClient()).toBeUndefined();
+
+    await client.primeSite();
+    expect(client.siteClient()).toBeDefined();
+    expect(client.siteAuth()?.authorized()).toBe(true);
+    expect(primes).toBe(1);
+
+    // A second call is a no-op: an established session must not be replaced.
+    const first = client.siteAuth();
+    await client.primeSite();
+    expect(client.siteAuth()).toBe(first);
+    expect(primes).toBe(1);
+  });
+
   it('restores a persisted site session on bootstrap', async () => {
     const server = await serve((req, res) => {
       void readBody(req).then(() => {

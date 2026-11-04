@@ -7,7 +7,12 @@
 import { CookieSession, CookieJar } from '../internal/cookies.js';
 import { HttpClient, readTextLimited, trimRight } from '../internal/http.js';
 import { discardLogger, type Logger } from '../logger.js';
-import { ForeignMirrorHostError, InvalidCredentialsError, FilmixError } from '../errors.js';
+import {
+  ForeignMirrorHostError,
+  InvalidCredentialsError,
+  FilmixError,
+  WarmUpFailedError,
+} from '../errors.js';
 import type { SiteSession } from './store.js';
 
 export const DEFAULT_MIRROR = 'https://filmix.gg';
@@ -74,7 +79,11 @@ export class PasswordAuthenticator {
     this.log.info('filmix.password.login_ok', { user: username });
   }
 
-  /** Reports whether login (or restore) completed successfully. */
+  /**
+   * Reports whether the session is usable for site endpoints — set by
+   * {@link login}, {@link restore} or {@link prime}. It is not a claim that a
+   * user account is attached: a primed anonymous session also returns true.
+   */
   authorized(): boolean {
     return this.authorizedFlag;
   }
@@ -143,12 +152,34 @@ export class PasswordAuthenticator {
     };
   }
 
-  private async priming(opts: { signal?: AbortSignal }): Promise<void> {
+  /**
+   * GETs the mirror's homepage and keeps the cookies it sets, marking the
+   * session usable without a login.
+   *
+   * The site binds `/api/movies/player-data` to the `minotaurs`/`x-a-key`
+   * cookies rather than to a user account: without them it answers HTTP 403,
+   * with them an anonymous session gets a real (if smaller) translation list.
+   * Call this instead of {@link login} when there are no credentials.
+   *
+   * @throws {WarmUpFailedError} when the homepage does not answer HTTP 200.
+   */
+  async prime(opts: { signal?: AbortSignal } = {}): Promise<void> {
+    const status = await this.priming(opts);
+    if (status !== 200) {
+      throw new WarmUpFailedError(`GET ${this.mirror}/ returned HTTP ${status}`);
+    }
+    this.authorizedFlag = true;
+    this.log.info('filmix.password.primed', { mirror: this.mirror });
+  }
+
+  /** The priming GET. Returns the status so {@link prime} can insist on 200. */
+  private async priming(opts: { signal?: AbortSignal }): Promise<number> {
     const { res } = await this.session.fetch(`${this.mirror}/`, {
       headers: this.browserHeaders(),
       ...(opts.signal ? { signal: opts.signal } : {}),
     });
     await readTextLimited(res, 64 * 1024);
+    return res.status;
   }
 }
 

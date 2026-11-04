@@ -44,6 +44,80 @@ describe('SiteClient.playerData', () => {
     await expect(client.fetchPlaylist('#2x')).rejects.toThrow(NotAuthorizedError);
   });
 
+  it('re-primes the cookies and retries once when the site answers 403', async () => {
+    let primes = 0;
+    let posts = 0;
+    const mirror = await serve((req, res) => {
+      void readBody(req).then(() => {
+        const path = new URL(req.url ?? '/', 'http://127.0.0.1').pathname;
+        if (path.endsWith('/engine/ajax/user_auth.php')) {
+          res.writeHead(200);
+          res.end('AUTHORIZED');
+          return;
+        }
+        if (path === '/') {
+          primes += 1;
+          res.writeHead(200);
+          res.end('<html></html>');
+          return;
+        }
+        if (path.endsWith('/api/movies/player-data')) {
+          posts += 1;
+          // Stale until the session has been primed a second time.
+          if (primes < 2) {
+            res.writeHead(403);
+            res.end('forbidden');
+            return;
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(MOVIE_PLAYER_DATA);
+          return;
+        }
+        res.writeHead(200);
+        res.end('<html></html>');
+      });
+    });
+
+    const auth = await fakeAuth(mirror.url);
+    expect(primes).toBe(1); // login's own priming GET
+    const data = await new SiteClient(auth).playerData(1, '');
+
+    expect([...data.video.keys()]).toEqual(['Дубляж', 'Оригинал']);
+    expect(primes).toBe(2);
+    expect(posts).toBe(2);
+  });
+
+  it('gives up after a single re-prime', async () => {
+    let primes = 0;
+    let posts = 0;
+    const mirror = await serve((req, res) => {
+      void readBody(req).then(() => {
+        const path = new URL(req.url ?? '/', 'http://127.0.0.1').pathname;
+        if (path.endsWith('/engine/ajax/user_auth.php')) {
+          res.writeHead(200);
+          res.end('AUTHORIZED');
+        } else if (path === '/') {
+          primes += 1;
+          res.writeHead(200);
+          res.end('<html></html>');
+        } else if (path.endsWith('/api/movies/player-data')) {
+          posts += 1;
+          res.writeHead(403);
+          res.end('forbidden');
+        } else {
+          res.writeHead(200);
+          res.end('<html></html>');
+        }
+      });
+    });
+
+    const auth = await fakeAuth(mirror.url);
+    const err = await new SiteClient(auth).playerData(1, '').catch((e: unknown) => e);
+    expect(isErrorOfType(err, HttpStatusError)).toBe(true);
+    expect(primes).toBe(2);
+    expect(posts).toBe(2);
+  });
+
   it('warms up the post page, posts the id, and parses the translations', async () => {
     const seen: { path: string; body: string; referer: string }[] = [];
     const mirror = await serve((req, res) => {

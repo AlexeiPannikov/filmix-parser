@@ -41,13 +41,14 @@ info / links flags:
   --season <n>          Season to resolve links for (series only) [default: 1]
   --episode <n>         Episode to resolve links for (series only) [default: 1]
   --translation <name>  Resolve only this translation (default: all of them)
-  --source <path>       auto (default) | site | mobile. "site" requires a website
-                        session and fails loudly instead of downgrading; "mobile"
-                        skips the website path even when a session exists.
+  --source <path>       auto (default) | site | mobile. "site" fails loudly instead
+                        of downgrading to the mobile API; "mobile" skips the
+                        website path even when a session exists.
   --no-links            info only: skip link resolution
-  --user, --password    Credentials for the site flow (also FILMIX_USER / FILMIX_PASS);
-                        with a site session the links are decoded from the
-                        website manifests instead of the mobile API templates.
+  --user, --password    Credentials for the site flow (also FILMIX_USER / FILMIX_PASS).
+                        Optional: without them an anonymous website session is
+                        primed automatically, which is enough to decode the links
+                        from the website manifests. Credentials unlock more dubs.
 
 Set FILMIX_DEBUG=1 for verbose logging and FILMIX_MIRROR to override the site mirror
 (default https://filmix.gg).`;

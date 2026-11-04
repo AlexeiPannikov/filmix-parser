@@ -4,7 +4,12 @@ import { MemoryStore, type State } from '../src/auth/store.js';
 import { PasswordAuthenticator } from '../src/auth/password.js';
 import { ApiClient } from '../src/client/api.js';
 import { HttpClient } from '../src/internal/http.js';
-import { InvalidCredentialsError, TokenNotActivatedError, isErrorOfType } from '../src/errors.js';
+import {
+  InvalidCredentialsError,
+  TokenNotActivatedError,
+  WarmUpFailedError,
+  isErrorOfType,
+} from '../src/errors.js';
 import { readBody, startServer, type TestServer } from './helpers/server.js';
 
 const device = { name: 'go-filmix', vendor: 'Xiaomi', os: '11', apk: '2.0.9' };
@@ -182,6 +187,38 @@ describe('PasswordAuthenticator', () => {
     await expect(auth.login('u', 'p')).rejects.toThrow(InvalidCredentialsError);
     expect(auth.authorized()).toBe(false);
     expect(auth.snapshot()).toEqual({ mirror: '', cookies: [] });
+  });
+
+  it('primes an anonymous session from the homepage cookies', async () => {
+    const paths: string[] = [];
+    server = await startServer((req, res) => {
+      paths.push(req.url ?? '');
+      res.setHeader('Set-Cookie', ['x-a-key=sinatra; Path=/', 'minotaurs=abc; Path=/']);
+      res.writeHead(200);
+      res.end('<html></html>');
+    });
+
+    const auth = new PasswordAuthenticator({
+      http: new HttpClient({ timeoutMs: 5000 }),
+      mirror: server.url,
+    });
+    expect(auth.authorized()).toBe(false);
+    await auth.prime();
+    expect(auth.authorized()).toBe(true);
+    expect(paths).toEqual(['/']);
+    expect(auth.session.jar.headerFor(`${server.url}/any`)).toBe(
+      'x-a-key=sinatra; minotaurs=abc',
+    );
+  });
+
+  it('refuses to prime when the homepage does not answer 200', async () => {
+    server = await startServer((_req, res) => {
+      res.writeHead(503);
+      res.end('nope');
+    });
+    const auth = new PasswordAuthenticator({ mirror: server.url });
+    await expect(auth.prime()).rejects.toThrow(WarmUpFailedError);
+    expect(auth.authorized()).toBe(false);
   });
 
   it('defaults to the live mirror', () => {
