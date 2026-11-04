@@ -35,9 +35,13 @@ export function decode(encoded: string): string {
       `filmix: not a #2-encoded string (got ${JSON.stringify(encoded.slice(0, 20))})`,
     );
   }
-  // Some samples (clipboard, manifest content) carry the separator with
-  // surrounding whitespace; normalise both forms.
-  let s = encoded.slice('#2'.length).split(':<:').join('').split(': <:').join('');
+  // Drop every character outside the base64 alphabet. Splitting on the literal
+  // `:<:` is not enough: the separators overlap (`:<:<:` occurs in the wild) and
+  // a literal split leaves a `<:` residue, which either breaks the base64
+  // decode or hides a garbage chunk that is then reported missing. Stripping
+  // non-base64 characters handles every separator variant at once, along with
+  // the whitespace that clipboard and manifest samples arrive with.
+  let s = encoded.slice('#2'.length).replace(/[^A-Za-z0-9+/=]/g, '');
 
   for (const chunk of GARBAGE_CHUNKS) {
     const next = removeChunk(s, chunk);

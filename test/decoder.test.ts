@@ -68,6 +68,19 @@ describe('decode — validation', () => {
     expect(decode(encodeForTesting(payload))).toBe(payload);
   });
 
+  it('strips overlapping separators that a literal split would leave residue from', () => {
+    // Observed live: `:<:<:`. A `split(':<:').join('')` pass leaves `<:` behind,
+    // which then either breaks the base64 decode or hides a garbage chunk.
+    const payload = 'https://filmix.my/pl/x.txt';
+    const base = Buffer.from(payload, 'utf8').toString('base64');
+    expect(decode('#2' + GARBAGE_CHUNKS.join('') + ':<:<:' + base)).toBe(payload);
+
+    // The same residue sitting inside a garbage chunk must not hide it either.
+    const [first = '', ...rest] = GARBAGE_CHUNKS;
+    const split = first.slice(0, 11) + ':<:<:' + first.slice(11);
+    expect(decode('#2' + split + rest.join('') + base)).toBe(payload);
+  });
+
   it('also strips the whitespace-separated separator form', () => {
     const payload = 'https://filmix.my/pl/x.txt';
     const base = Buffer.from(payload, 'utf8').toString('base64');
