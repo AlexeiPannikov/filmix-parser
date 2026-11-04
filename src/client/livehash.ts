@@ -68,7 +68,11 @@ export class LivehashCache {
   /** Hits the reference post and extracts its `/s/{hash}/` segment. */
   private async fetchHash(opts: CallOptions): Promise<string> {
     const url = this.api.url(`post/${REFERENCE_POST_ID}`);
-    const body = await doRaw(this.api.http, this.api.logger, url, { ...signalInit(opts) });
+    const raw = await doRaw(this.api.http, this.api.logger, url, { ...signalInit(opts) });
+    // The API escapes every slash in its JSON (`https:\/\/host\/s\/hash\/`), so
+    // matching `/s/.../` against the raw body never succeeds. Unescape first;
+    // LIVEHASH_RE itself stays usable on real (unescaped) URLs in applyToUrl.
+    const body = raw.replace(/\\\//g, '/');
     const m = LIVEHASH_RE.exec(body);
     if (m === null) return '';
     // "/s/abc123/" -> "abc123"

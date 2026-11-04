@@ -460,7 +460,10 @@ export class Client {
         this.log.debug('filmix.site_translation_skip', { translation: name, reason: 'no_qualities' });
         continue;
       }
-      out.push({ translation: name, urls: await this.withLivehash(file.qualities, callOpts) });
+      // No livehash rewrite here: the manifest was fetched just now, so its
+      // `/s/{hash}/` is current, and the mobile API serves a *different* hash —
+      // applying it would replace a working prefix with a foreign one.
+      out.push({ translation: name, urls: new Map(file.qualities) });
     }
     return out;
   }

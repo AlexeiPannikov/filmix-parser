@@ -47,8 +47,11 @@ export interface ClientOptions {
   /** Overrides the device fingerprint sent on every API request. */
   device?: DeviceInfo;
   /**
-   * Enables CDN livehash refresh: MP4 URLs returned by the API are rewritten
-   * with the latest `/s/{hash}/` prefix before download. Off by default.
+   * Enables CDN livehash refresh on the **mobile API path only**: its
+   * `player_links` templates can carry a rotated-out `/s/{hash}/` prefix, which
+   * is replaced with the current one. The website path is left alone — its
+   * manifests are fetched live and carry a different, already-current hash.
+   * Off by default.
    */
   livehash?: boolean;
 }

@@ -13,6 +13,31 @@ afterEach(async () => {
 });
 
 describe('LivehashCache', () => {
+  it('finds the hash in a body whose slashes are JSON-escaped', async () => {
+    // How the real API serializes it. The hand-written fixture below uses plain
+    // slashes, which is why a regex that only matched `/s/` looked fine in
+    // tests while returning "" against production for every post.
+    server = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        '{"id":"171042","player_links":{"movie":[{"translation":"Default","link":"https:\\/\\/cdn.example.com\\/s\\/abc123def\\/file_[1080,720,480].mp4"}]}}',
+      );
+    });
+
+    const api = new ApiClient({
+      http: new HttpClient({ timeoutMs: 5000 }),
+      device,
+      apiBase: `${server.url}/api/v2`,
+      deviceId: 'abcd',
+      token: 'tok',
+    });
+    const cache = new LivehashCache(api);
+    expect(await cache.get()).toBe('abc123def');
+    expect(await cache.applyToUrl('https://cdn.example.com/s/stale/x.mp4')).toBe(
+      'https://cdn.example.com/s/abc123def/x.mp4',
+    );
+  });
+
   it('fetches the hash once and reuses it', async () => {
     let hits = 0;
     const paths: string[] = [];
