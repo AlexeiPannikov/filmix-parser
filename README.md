@@ -42,8 +42,23 @@ await client.loginByPassword('user', 'pass');         // → links.source === 's
 ```
 
 `resolveLinks` applies **no quality cap** — every advertised quality is returned and the caller
-decides. Note that on the mobile path without a device token the CDN serves short previews above
-~480p.
+decides. Pin the path with `source`:
+
+```ts
+await client.resolveLinks({ post, source: 'site' });   // fail loudly if the website path can't be used
+await client.resolveLinks({ post, source: 'mobile' }); // ignore the website session
+```
+
+With `'auto'` (the default) a website-path failure silently downgrades to the mobile API;
+`'site'` raises the underlying error instead, which is what you want while debugging.
+
+**Content gating.** Resolved URLs are always well-formed and return `200`, but without
+authorization the CDN serves a placeholder clip instead of the content — at *every* quality,
+480p included. Measured on 2026-11-04: three different translations of one post returned
+byte-identical placeholder files whose `Content-Length` and MP4 structure look entirely
+plausible, so the substitution is not detectable from the headers. The upstream Go client
+behaves identically, so this is a server-side gate keyed on the device token, not a client
+issue.
 
 Every method takes an optional `{ signal }` — the `context.Context` equivalent.
 
@@ -58,8 +73,8 @@ FILMIX_DEBUG=1 filmix ...              # verbose logging
 ```
 
 `info` / `links` flags: `--season <n>`, `--episode <n>` (series, default S1E1),
-`--translation <name>`, `--no-links` (`info` only), `--user` / `--password`
-(also `FILMIX_USER` / `FILMIX_PASS`).
+`--translation <name>`, `--source auto|site|mobile`, `--no-links` (`info` only),
+`--user` / `--password` (also `FILMIX_USER` / `FILMIX_PASS`).
 
 ```
 $ filmix info 154246
@@ -180,6 +195,13 @@ field reads `[4K UHD]URL`.
 `PasswordAuthenticator.login` does **not** check `Set-Cookie`: the DLE-style cookies are not set
 on AJAX login. Success is signalled by the body containing the literal string `AUTHORIZED`; the
 binding is server-side, keyed by the cookies set during the priming GET.
+
+### Mirrors go stale
+
+The default site mirror is `https://filmix.gg`; `filmix.my`, the default the Go client shipped
+with, now 301-redirects there. Override it with the `mirror` option when it moves again — and
+note that a mirror serving a 301 breaks the login POST, because a redirected POST degrades to a
+bodyless GET in every HTTP client.
 
 ### Livehash
 

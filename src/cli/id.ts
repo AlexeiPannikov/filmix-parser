@@ -2,7 +2,7 @@
  * Captures the post ID embedded in a Filmix page URL slug:
  *
  * ```
- * https://filmix.my/film/triller/184075-v-normal-2025.html
+ * https://filmix.gg/film/triller/184075-v-normal-2025.html
  *                                ^^^^^^
  * ```
  *

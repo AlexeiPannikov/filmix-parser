@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 
-import type { Client, ResolvedLinks } from '../filmix.js';
+import type { Client, ResolvedLinks, ResolveSource } from '../filmix.js';
 import type { Episode } from '../models/post.js';
 import { parseIdArgWithUrl } from './id.js';
 import { formatTable } from './table.js';
@@ -52,6 +52,7 @@ export async function cmdInfo(ctx: CommandContext, args: string[]): Promise<void
       season: { type: 'string', default: '1' },
       episode: { type: 'string', default: '1' },
       translation: { type: 'string', default: '' },
+      source: { type: 'string', default: 'auto' },
       links: { type: 'boolean', default: true },
       'no-links': { type: 'boolean', default: false },
       user: { type: 'string', default: '' },
@@ -70,6 +71,7 @@ export async function cmdInfo(ctx: CommandContext, args: string[]): Promise<void
   const season = parsePositiveInt(values.season ?? '1', '--season');
   const episode = parsePositiveInt(values.episode ?? '1', '--episode');
   const translation = values.translation ?? '';
+  const source = parseSource(values.source ?? 'auto');
   const showLinks = (values.links ?? true) && !(values['no-links'] ?? false);
 
   const post = await ctx.client.getPost(id, { signal: ctx.signal });
@@ -117,6 +119,7 @@ export async function cmdInfo(ctx: CommandContext, args: string[]): Promise<void
     season,
     episode,
     translation,
+    source,
     sourceUrl,
     signal: ctx.signal,
   });
@@ -152,10 +155,18 @@ export function printLinks(
   if (links.source === 'mobile') {
     console.log();
     console.log(
-      '  Note: without a device token or a site session the CDN serves short previews above ~480p.',
+      '  Note: without a device token or a site session the CDN serves a placeholder clip',
     );
+    console.log('  instead of the content, at every quality.');
     console.log('  Pass --user/--password to resolve the links through the website session.');
   }
+}
+
+/** Validates the `--source` flag. */
+export function parseSource(raw: string): ResolveSource {
+  if (raw === '' || raw === 'auto') return 'auto';
+  if (raw === 'site' || raw === 'mobile') return raw;
+  throw new Error(`--source: expected auto, site or mobile, got ${JSON.stringify(raw)}`);
 }
 
 function parsePositiveInt(raw: string, flag: string): number {
@@ -191,6 +202,7 @@ export async function cmdLinks(ctx: CommandContext, args: string[]): Promise<voi
       season: { type: 'string', default: '1' },
       episode: { type: 'string', default: '1' },
       translation: { type: 'string', default: '' },
+      source: { type: 'string', default: 'auto' },
       user: { type: 'string', default: '' },
       password: { type: 'string', default: '' },
     },
@@ -210,6 +222,7 @@ export async function cmdLinks(ctx: CommandContext, args: string[]): Promise<voi
     season: parsePositiveInt(values.season ?? '1', '--season'),
     episode: parsePositiveInt(values.episode ?? '1', '--episode'),
     translation: values.translation ?? '',
+    source: parseSource(values.source ?? 'auto'),
     sourceUrl,
     signal: ctx.signal,
   });

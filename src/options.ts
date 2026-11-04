@@ -41,7 +41,7 @@ export interface ClientOptions {
   /**
    * User-facing website URL embedded into the activation link shown during the
    * device-token flow, and the host used by the website path. Defaults to
-   * `https://filmix.my`.
+   * `https://filmix.gg`.
    */
   mirror?: string;
   /** Overrides the device fingerprint sent on every API request. */

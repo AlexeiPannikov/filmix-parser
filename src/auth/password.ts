@@ -10,14 +10,14 @@ import { discardLogger, type Logger } from '../logger.js';
 import { ForeignMirrorHostError, InvalidCredentialsError, FilmixError } from '../errors.js';
 import type { SiteSession } from './store.js';
 
-export const DEFAULT_MIRROR = 'https://filmix.my';
+export const DEFAULT_MIRROR = 'https://filmix.gg';
 
 const USER_AGENT =
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
 
 export interface PasswordAuthenticatorOptions {
   http?: HttpClient;
-  /** Site host, e.g. `https://filmix.my`. Independent of the mobile API host. */
+  /** Site host, e.g. `https://filmix.gg`. Independent of the mobile API host. */
   mirror?: string;
   logger?: Logger;
 }

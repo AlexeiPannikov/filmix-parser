@@ -4,7 +4,7 @@ import { Client } from '../src/filmix.js';
 import { MemoryStore } from '../src/auth/store.js';
 import { Plan } from '../src/models/quality.js';
 import { encodeForTesting } from '../src/site/decoder.js';
-import { ContentLockedError, isErrorOfType } from '../src/errors.js';
+import { ContentLockedError, NotAuthorizedError, isErrorOfType } from '../src/errors.js';
 import { fixture, readBody, startServer, type TestServer } from './helpers/server.js';
 
 const servers: TestServer[] = [];
@@ -267,6 +267,63 @@ describe('resolveLinks — website path', () => {
     const post = await client.getPost(12345);
     const err = await client.resolveLinks({ post }).catch((e: unknown) => e);
     expect(isErrorOfType(err, ContentLockedError)).toBe(true);
+  });
+
+  it("source: 'mobile' skips the website path even with a session", async () => {
+    const { server, manifestHits } = await siteServer();
+    const client = new Client({ apiBase: `${server.url}/api/v2`, mirror: server.url });
+    await client.loginByPassword('u', 'p');
+    const post = await client.getPost(12345);
+
+    const links = await client.resolveLinks({ post, source: 'mobile' });
+    expect(links.source).toBe('mobile');
+    expect(manifestHits()).toBe(0);
+    expect(links.translations[0]?.translation).toBe('x');
+  });
+
+  it("source: 'site' without a session throws instead of downgrading", async () => {
+    const server = await mobileApi();
+    const client = new Client({ apiBase: `${server.url}/api/v2` });
+    const post = await client.getPost(12345);
+
+    const err = await client.resolveLinks({ post, source: 'site' }).catch((e: unknown) => e);
+    expect(isErrorOfType(err, NotAuthorizedError)).toBe(true);
+  });
+
+  it("source: 'site' surfaces the website-path failure", async () => {
+    const server = await serve((req, res) => {
+      void readBody(req).then(() => {
+        const p = new URL(req.url ?? '/', 'http://127.0.0.1').pathname;
+        if (p.endsWith('/engine/ajax/user_auth.php')) {
+          res.writeHead(200);
+          return res.end('AUTHORIZED');
+        }
+        if (p.endsWith('/api/movies/player-data')) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end('{"type":"success","message":{"translations":{"video":[]}}}');
+        }
+        if (p.includes('/post/')) {
+          void fixture('post_movie.json').then((body) => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(body);
+          });
+          return;
+        }
+        res.writeHead(200);
+        res.end('<html></html>');
+      });
+    });
+
+    const client = new Client({ apiBase: `${server.url}/api/v2`, mirror: server.url });
+    await client.loginByPassword('u', 'p');
+    const post = await client.getPost(12345);
+
+    // auto downgrades…
+    expect((await client.resolveLinks({ post })).source).toBe('mobile');
+    // …while an explicit pin reports why.
+    await expect(client.resolveLinks({ post, source: 'site' })).rejects.toThrow(
+      /player-data returned no translations/,
+    );
   });
 
   it('restores a persisted site session on bootstrap', async () => {

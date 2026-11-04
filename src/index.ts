@@ -5,7 +5,12 @@
  * sub-clients it is built from.
  */
 export { Client, pickPlaylistFile } from './filmix.js';
-export type { ResolveRequest, ResolvedLinks, ResolvedTranslation } from './filmix.js';
+export type {
+  ResolveRequest,
+  ResolvedLinks,
+  ResolvedTranslation,
+  ResolveSource,
+} from './filmix.js';
 
 export { resolveOptions, defaultDevice, DEFAULT_TIMEOUT_MS } from './options.js';
 export type { ClientOptions, ResolvedOptions, DeviceInfo, FetchLike } from './options.js';

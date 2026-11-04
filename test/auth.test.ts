@@ -184,6 +184,14 @@ describe('PasswordAuthenticator', () => {
     expect(auth.snapshot()).toEqual({ mirror: '', cookies: [] });
   });
 
+  it('defaults to the live mirror', () => {
+    expect(new PasswordAuthenticator().mirror).toBe('https://filmix.gg');
+    expect(new PasswordAuthenticator({ mirror: '' }).mirror).toBe('https://filmix.gg');
+    expect(new PasswordAuthenticator({ mirror: 'https://other.filmix.test/' }).mirror).toBe(
+      'https://other.filmix.test',
+    );
+  });
+
   it('restores a snapshot and rejects a mismatched mirror', () => {
     const auth = new PasswordAuthenticator({ mirror: 'https://filmix.my' });
     expect(() => auth.restore({ mirror: 'https://other.example', cookies: [] })).toThrow(

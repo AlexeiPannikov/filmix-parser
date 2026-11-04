@@ -24,12 +24,15 @@ Commands:
   links <id|url>       Print only the resolved CDN links, one block per translation.
 
 <id|url> can be either a numeric post id (e.g. 184075) or a Filmix page URL
-(e.g. https://filmix.my/film/triller/184075-v-normal-2025.html).
+(e.g. https://filmix.gg/film/triller/184075-v-normal-2025.html).
 
 info / links flags:
   --season <n>          Season to resolve links for (series only) [default: 1]
   --episode <n>         Episode to resolve links for (series only) [default: 1]
   --translation <name>  Resolve only this translation (default: all of them)
+  --source <path>       auto (default) | site | mobile. "site" requires a website
+                        session and fails loudly instead of downgrading; "mobile"
+                        skips the website path even when a session exists.
   --no-links            info only: skip link resolution
   --user, --password    Credentials for the site flow (also FILMIX_USER / FILMIX_PASS);
                         with a site session the links are decoded from the

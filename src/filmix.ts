@@ -40,6 +40,7 @@ import {
   ContentLockedError,
   EpisodeNotFoundError,
   FilmixError,
+  NotAuthorizedError,
   PlayerDataEmptyError,
   isErrorOfType,
 } from './errors.js';
@@ -55,6 +56,17 @@ import { SiteClient } from './site/client.js';
 import type { Playlist, PlaylistFile } from './site/playlist.js';
 
 /**
+ * Which resolution path {@link Client.resolveLinks} may use.
+ *
+ * - `auto` (the default): try the website path when a session exists, fall
+ *   back to the mobile API on any failure.
+ * - `site`: require the website path. Without a session, or on any failure,
+ *   the error is raised instead of silently returning weaker links.
+ * - `mobile`: skip the website path even when a session exists.
+ */
+export type ResolveSource = 'auto' | 'site' | 'mobile';
+
+/**
  * Which season/episode of a {@link Post} to resolve links for.
  *
  * For movies the season/episode fields are ignored. For series they default to
@@ -67,11 +79,13 @@ export interface ResolveRequest {
   season?: number;
   episode?: number;
   /**
-   * Canonical filmix.my page URL of the post, used by the website path to warm
+   * Canonical Filmix page URL of the post, used by the website path to warm
    * up server state before fetching player-data. Optional — when empty,
    * `/play/{post.id}` is used as a redirector.
    */
   sourceUrl?: string;
+  /** Pins the resolution path. Defaults to `auto`. */
+  source?: ResolveSource;
   signal?: AbortSignal;
 }
 
@@ -252,7 +266,7 @@ export class Client {
   }
 
   /**
-   * The configured website host (e.g. `https://filmix.my`). Useful for building
+   * The configured website host (e.g. `https://filmix.gg`). Useful for building
    * page URLs from search results.
    */
   get mirror(): string {
@@ -321,8 +335,13 @@ export class Client {
    * caller decides what to do with it. Note that on the mobile path without a
    * device token the CDN serves short previews above ~480p.
    *
+   * Pass `source` to pin a path: `'site'` turns every website-path failure
+   * into a thrown error instead of a silent downgrade, and `'mobile'` skips
+   * the website path entirely.
+   *
    * @throws {ContentLockedError} when player-data reports a rights-holder
    * takedown; that verdict is authoritative, so no fallback is attempted.
+   * @throws {NotAuthorizedError} with `source: 'site'` and no website session.
    */
   async resolveLinks(req: ResolveRequest): Promise<ResolvedLinks> {
     // Guard the trust boundary: JavaScript callers get a clear error instead of
@@ -330,18 +349,27 @@ export class Client {
     if (req === null || typeof req !== 'object' || typeof req.post?.id !== 'number') {
       throw new FilmixError('filmix: ResolveRequest.post is required');
     }
+    const wanted: ResolveSource = req.source ?? 'auto';
     const callOpts: CallOptions = req.signal ? { signal: req.signal } : {};
     await this.ensureBootstrap(callOpts);
 
     const site = this.site;
-    if (site !== undefined) {
+    if (wanted === 'site' && site === undefined) {
+      throw new NotAuthorizedError();
+    }
+    if (site !== undefined && wanted !== 'mobile') {
       try {
         const translations = await this.resolveSiteLinks(site, req);
         if (translations.length > 0) return { source: 'site', translations };
+        if (wanted === 'site') {
+          throw new PlayerDataEmptyError();
+        }
         this.log.warn('filmix.site_path_empty', {
           hint: 'no translation yielded a usable manifest; falling back to the mobile API',
         });
       } catch (err) {
+        // A pinned site path must surface the reason, not downgrade silently.
+        if (wanted === 'site') throw err;
         if (isErrorOfType(err, ContentLockedError)) throw err;
         if (isErrorOfType(err, PlayerDataEmptyError)) {
           this.log.warn('filmix.site_path_empty', {

@@ -1,7 +1,7 @@
 /** CLI argument parsing and helpers (port of `cmd/filmix/*_test.go`). */
 import { describe, expect, it } from 'vitest';
 import { hostLooksLikeFilmix, parseIdArg, parseIdArgWithUrl } from '../src/cli/id.js';
-import { printLinks, uniformQualities } from '../src/cli/commands.js';
+import { parseSource, printLinks, uniformQualities } from '../src/cli/commands.js';
 import { formatTable } from '../src/cli/table.js';
 
 describe('parseIdArg', () => {
@@ -59,6 +59,22 @@ describe('uniformQualities', () => {
         { number: 2, link: '', qualities: [480, 720] },
       ]),
     ).toBeUndefined();
+  });
+});
+
+describe('parseSource', () => {
+  it.each([
+    ['', 'auto'],
+    ['auto', 'auto'],
+    ['site', 'site'],
+    ['mobile', 'mobile'],
+  ])('parseSource(%j) === %j', (raw, want) => {
+    expect(parseSource(raw)).toBe(want);
+  });
+
+  it('rejects anything else', () => {
+    expect(() => parseSource('website')).toThrow(/expected auto, site or mobile/);
+    expect(() => parseSource('SITE')).toThrow();
   });
 });
 

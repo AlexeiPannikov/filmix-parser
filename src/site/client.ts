@@ -7,7 +7,7 @@
  * 1. POST `/api/movies/player-data` — returns a JSON map of translation name →
  *    `#2`-encoded payload.
  * 2. Decode the payload locally to recover the URL of a `.txt` manifest hosted
- *    on `filmix.my/pl/...`.
+ *    on `<mirror>/pl/...`.
  * 3. GET that manifest with the same session cookies — it returns another `#2`
  *    encoded blob.
  * 4. Decode the blob into a JSON playlist: a flat list for movies, a
