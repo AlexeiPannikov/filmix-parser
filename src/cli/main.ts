@@ -12,7 +12,7 @@
  */
 import { Client } from '../filmix.js';
 import { consoleLogger } from '../logger.js';
-import { cmdDownload, cmdInfo, cmdLogin, cmdSearch, type CommandContext } from './commands.js';
+import { cmdInfo, cmdLinks, cmdLogin, cmdSearch, type CommandContext } from './commands.js';
 import { FileStore } from './config-store.js';
 
 const USAGE = `Usage: filmix <command> [args]
@@ -20,20 +20,20 @@ const USAGE = `Usage: filmix <command> [args]
 Commands:
   login                Start the device-token flow (or --user/--password for the site flow).
   search <query>       Search posts by title.
-  info <id|url>        Print details (translations, seasons, episodes, qualities).
-  download <id|url>    Download a movie, episode, or a range of episodes.
+  info <id|url>        Print details (translations, seasons, qualities) and the CDN links.
+  links <id|url>       Print only the resolved CDN links, one block per translation.
 
 <id|url> can be either a numeric post id (e.g. 184075) or a Filmix page URL
 (e.g. https://filmix.my/film/triller/184075-v-normal-2025.html).
 
-download flags:
-  --translation <name>  Translation name (default: first available)
-  --season <range>      Season or range of seasons (e.g. 1, 2-3, 1,3,5) [default: 1]
-  --episodes <range>    Episodes (e.g. 1, 3-5, 1,3,7-9); empty = all of the selected seasons
-  --quality <height>    Pixel height (e.g. 1080); 0 = highest available
-  --output <path>       Output file (single download) or directory (multiple downloads)
-  --no-progress         Disable the progress bar
-  --user, --password    Credentials for the site flow (also FILMIX_USER / FILMIX_PASS)
+info / links flags:
+  --season <n>          Season to resolve links for (series only) [default: 1]
+  --episode <n>         Episode to resolve links for (series only) [default: 1]
+  --translation <name>  Resolve only this translation (default: all of them)
+  --no-links            info only: skip link resolution
+  --user, --password    Credentials for the site flow (also FILMIX_USER / FILMIX_PASS);
+                        with a site session the links are decoded from the
+                        website manifests instead of the mobile API templates.
 
 Set FILMIX_DEBUG=1 for verbose logging.`;
 
@@ -81,8 +81,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       case 'info':
         await cmdInfo(ctx, args);
         break;
-      case 'download':
-        await cmdDownload(ctx, args);
+      case 'links':
+        await cmdLinks(ctx, args);
         break;
       default:
         process.stderr.write(`unknown command: ${command}\n`);

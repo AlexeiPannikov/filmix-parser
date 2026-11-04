@@ -4,8 +4,8 @@
  * The public surface mirrors the Go root package: a {@link Client} facade plus
  * the models, errors and sub-clients it is built from.
  */
-export { Client, translationKey, deriveDestination, pickLink, pickPlaylistFile } from './filmix.js';
-export type { DownloadRequest } from './filmix.js';
+export { Client, pickPlaylistFile } from './filmix.js';
+export type { ResolveRequest, ResolvedLinks, ResolvedTranslation } from './filmix.js';
 
 export { resolveOptions, defaultDevice, DEFAULT_TIMEOUT_MS } from './options.js';
 export type { ClientOptions, ResolvedOptions, DeviceInfo, FetchLike } from './options.js';
@@ -64,10 +64,6 @@ export {
 } from './site/index.js';
 export type { Playlist, PlayerData } from './site/index.js';
 
-// Downloads.
-export { Downloader, partFile, parseContentRange } from './download/index.js';
-export type { DownloadFileRequest, ProgressFunc, ContentRange } from './download/index.js';
-
 // HTTP plumbing (useful for custom transports and tests).
 export { HttpClient, buildUrl, redactUrlString } from './internal/http.js';
 export type { HttpClientOptions } from './internal/http.js';
@@ -94,6 +90,5 @@ export {
   HttpStatusError,
   TransportError,
   DecodeError,
-  DownloadError,
   isErrorOfType,
 } from './errors.js';

@@ -1,10 +1,12 @@
 {
-  "name": "filmix-ts",
+  "name": "filmix-parser",
   "version": "1.0.0",
-  "description": "TypeScript port of n0madic/go-filmix: library and CLI for Filmix content metadata and downloads",
+  "description": "TypeScript port of n0madic/go-filmix: Filmix search, post metadata and direct CDN link resolution (no media download)",
   "license": "MIT",
   "type": "module",
-  "engines": { "node": ">=20.6" },
+  "engines": {
+    "node": ">=20.6"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -13,8 +15,13 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": { "filmix": "./dist/cli/main.js" },
-  "files": ["dist", "README.md"],
+  "bin": {
+    "filmix": "./dist/cli/main.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

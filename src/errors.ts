@@ -135,9 +135,6 @@ export class TransportError extends FilmixError {}
 /** A response body could not be decoded into the expected shape. */
 export class DecodeError extends FilmixError {}
 
-/** Anything the downloader rejects before or during the transfer. */
-export class DownloadError extends FilmixError {}
-
 type Ctor<T> = abstract new (...args: never[]) => T;
 
 /**

@@ -1,7 +1,8 @@
-# filmix-ts
+# filmix-parser
 
-TypeScript port of [`n0madic/go-filmix`](https://github.com/n0madic/go-filmix) — a library and
-CLI for resolving Filmix content metadata and streaming MP4 files to disk.
+TypeScript port of [`n0madic/go-filmix`](https://github.com/n0madic/go-filmix), reduced to what we
+need: searching Filmix, reading post metadata, and **resolving direct CDN links for every
+translation**. Media transfer is deliberately out of scope — there is no downloader.
 
 Zero runtime dependencies: the global `fetch`, `node:fs`, `node:crypto` and `node:util` cover
 everything the Go version got from the standard library.
@@ -15,68 +16,95 @@ npm run check        # typecheck + lint + tests
 ## Library
 
 ```ts
-import { Client, consoleLogger } from 'filmix-ts';
+import { Client, consoleLogger } from 'filmix-parser';
 
 const client = new Client({ logger: consoleLogger('info') });
 
-await client.loginByPassword('user', 'pass');          // website session (preferred)
-const results = await client.search('Inception');
+const results = await client.search('Матрица');
 const post = await client.getPost(results[0]!.id);
 
-await client.download({
-  post,
-  destination: '/tmp/',                                 // trailing slash → CDN filename in dir
-  progress: (done, total) => process.stdout.write(`\r${done}/${total}`),
-});
+const links = await client.resolveLinks({ post });   // movies
+// const links = await client.resolveLinks({ post, season: 2, episode: 5 }); // series
+
+console.log(links.source);                            // 'site' | 'mobile'
+for (const t of links.translations) {
+  for (const [quality, url] of t.urls) {
+    console.log(t.translation, `${quality}p`, url);
+  }
+}
 ```
 
-Device-token flow (when password login is not desired):
+With a website session the URLs are decoded from the `#2` manifests; otherwise they are derived
+from the mobile API's `player_links` templates:
 
 ```ts
-const pending = await client.authenticate();            // show pending.userCode to the user
-await client.waitForActivation(pending, 5000);          // polls until activated
+await client.loginByPassword('user', 'pass');         // → links.source === 'site'
 ```
+
+`resolveLinks` applies **no quality cap** — every advertised quality is returned and the caller
+decides. Note that on the mobile path without a device token the CDN serves short previews above
+~480p.
 
 Every method takes an optional `{ signal }` — the `context.Context` equivalent.
 
 ## CLI
 
 ```bash
-filmix login --user X --password Y        # or bare `filmix login` for the device flow
-filmix search "query"
-filmix info <id|url>
-filmix download [flags] <id|url>
-FILMIX_DEBUG=1 filmix ...                 # verbose logging
+filmix search "Матрица"
+filmix info <id|url>                  # metadata + CDN links
+filmix links <id|url>                 # just the CDN links
+filmix login --user X --password Y     # website session (or bare `login` for the device flow)
+FILMIX_DEBUG=1 filmix ...              # verbose logging
+```
+
+`info` / `links` flags: `--season <n>`, `--episode <n>` (series, default S1E1),
+`--translation <name>`, `--no-links` (`info` only), `--user` / `--password`
+(also `FILMIX_USER` / `FILMIX_PASS`).
+
+```
+$ filmix info 154246
+ID:        154246
+Title:     Матрица: Воскрешение
+Original:  The Matrix: Resurrections
+Year:      2021
+Type:      movie
+Translations:
+  - Дубляж [Rus, 4K, SDR]  qualities=[2160 1440 1080 720 480]
+  - HEVC 4К AC3  qualities=[2160]
+
+CDN links (mobile: derived from the mobile API templates):
+  HEVC 4К AC3
+    2160p  https://chache08.werkecdn.me/s/<signature>/hevc/The.Matrix…HEVC_2160.mp4
+  Дубляж [Rus, 4K, SDR]
+    2160p  https://nl03.werkecdn.me/s/<signature>/uhd_018/The.Matrix…rus_2160.mp4
+    1080p  https://nl03.werkecdn.me/s/<signature>/uhd_018/The.Matrix…rus_1080.mp4
 ```
 
 The session is persisted in `<config dir>/filmix/config.json` (mode 0600), using the same JSON
 field names as the Go CLI, so the two can share a config file. Delete it to start fresh.
 
-## Two paths to the content
+## Two paths to a CDN link
 
-The repository implements **two parallel paths** to a downloadable MP4 URL. `Client.download`
-calls them in priority order.
+`Client.resolveLinks` tries them in priority order.
 
 ### Path A — website session (`src/site/`)
 
-Preferred. Driven by `loginByPassword` → password POST → cookie jar.
+Preferred, requires `loginByPassword`.
 
 1. POST `/api/movies/player-data` → JSON with `translations.video` = `{name: "#2..."}` per dub.
 2. **Decode `#2` locally** (`site/decoder.ts`) → URL of a `.txt` manifest on `filmix.my/pl/...`.
 3. GET that manifest with the same session → another `#2`-encoded blob.
 4. Decode → JSON playlist (`parsePlaylist`) → per episode a `file` field shaped
-   `[480p]URL,[720p]URL,[1080p]URL`.
-5. Pick season/episode/quality → direct CDN URL → `Downloader.do`.
+   `[480p]URL,[720p]URL,[1080p]URL` — those are the direct CDN URLs.
 
 ### Path B — mobile API (`src/client/`)
 
-Fallback, used when there is no site session or the site path fails.
+Fallback, needs no credentials.
 
 1. `discover` probes the fallback list concurrently.
 2. `ApiClient.getPost` → `Post` with `player_links`.
-3. Substitute the quality into the embedded URL (`_[1080,720,480].mp4` or `_%s.mp4` — both
-   supported by `applyQuality`).
-4. Optional livehash refresh, then `Downloader.do`.
+3. Substitute each quality into the embedded template (`_[1080,720,480].mp4` or `_%s.mp4` —
+   both supported by `applyQuality`), optionally refreshing the livehash prefix.
 
 ## Critical non-obvious knowledge
 
@@ -95,7 +123,7 @@ share garbage and differ in real content).
 Decoded output is validated with `looksLikeText`: the split-chunk fallback can spuriously match
 real base64 noise, and the resulting payload decodes "successfully" into bytes containing
 control characters. Any control byte outside `\t\n\r` means corruption, so the decode fails and
-the caller falls back to the mobile API instead of forwarding a mangled URL.
+the resolver falls back to the mobile API instead of returning a mangled URL.
 
 ### Warm-up before `player-data`
 
@@ -106,7 +134,7 @@ why the cookie session follows redirects manually.
 
 ### URL-host preference for the site path
 
-When `DownloadRequest.sourceUrl` is set and its host differs from the configured mirror, the
+When `ResolveRequest.sourceUrl` is set and its host differs from the configured mirror, the
 warm-up and player-data POST go to the **URL's host** first; session cookies are mirrored across
 hosts on a best-effort basis. On any failure the call is retried against the configured mirror.
 `PasswordAuthenticator.mirrorCookiesTo` refuses hosts that do not look like a Filmix mirror
@@ -124,38 +152,16 @@ hosts on a best-effort basis. On any failure the call is retried against the con
 The API returns `id`/`year`/`section` as JSON **numbers**, though some endpoints use strings; the
 decoders accept either.
 
-### Quality cap policy
+### Per-translation resilience
 
-Lives in `Client.download` / `Client['qualityCap']`, not in `maxQualityFor`:
+A translation whose manifest cannot be fetched, decoded or matched to the requested
+season/episode is **skipped** (logged as `filmix.site_translation_skip`), so one broken dub
+cannot hide the rest. On the mobile path a dub that simply does not carry the requested
+season/episode is skipped the same way — unless the caller pinned it with `translation`, in which
+case the error surfaces.
 
-- Active site session → cap 720p (Free tier). Pass an explicit `quality` to override.
-- Site session failed → cap 480p (guest), because the mobile-API path without a device token
-  serves only ~10-second previews at higher qualities.
-- No site session → cap `maxQualityFor(currentPlan())`.
-
-`pickBest` enforces the cap strictly, so the site path falls back to a **different translation**
-rather than downloading an over-cap preview clip. With an empty `translation`, candidates are
-tried alphabetically; one whose manifest offers nothing under the cap (e.g. an alphabetically
-first "HEVC 4K" dub with only `[4K UHD]`) is skipped and logged as
-`filmix.site_translation_skip`. An explicit `translation` disables the loop.
-
-### Download timeout
-
-`Downloader` **drops** the configured `timeoutMs`, because it applies to the whole request
-lifecycle, body included — a 30 s timeout cuts 100+ MB streams. Per-call cancellation goes
-through `signal`.
-
-### Destination derivation and partial files
-
-`deriveDestination` resolves the output path from the CDN URL after path selection: empty hint →
-URL basename in the CWD; trailing `/` or platform separator → URL basename inside that
-directory; anything else → used verbatim.
-
-The partial file is `<dest>.part[_<variant>][_<quality>p]`. `quality` is the picked pixel height
-(so a 480p partial is never resumed against a 720p URL) and `variant` is `translationKey(name)`
-— the translation name with non-alphanumerics stripped, bounded to 16 characters, Unicode-aware.
-The same translation across runs yields the same key and resumes the same partial; different
-translations get distinct partials that coexist on disk.
+A rights-holder takedown (`lv` flag in player-data) raises `ContentLockedError` and is **not**
+retried through the mobile path: that verdict is authoritative.
 
 ### Direct file-field shortcut
 
@@ -176,12 +182,21 @@ field reads `[4K UHD]URL`.
 on AJAX login. Success is signalled by the body containing the literal string `AUTHORIZED`; the
 binding is server-side, keyed by the cookies set during the priming GET.
 
+### Livehash
+
+`WithLivehash` is off by default (`livehash: true` to enable). It issues an extra request to
+`/api/v2/post/171042` and rewrites the `/s/{hash}/` prefix of resolved URLs — only useful for the
+mobile path when CDN URLs go stale.
+
 ## Differences from the Go implementation
 
-Behavioural parity was the goal; these are the deliberate deviations.
+Behavioural parity was the goal for everything that was ported; these are the deliberate
+deviations.
 
 | Area | Go | TypeScript |
 | --- | --- | --- |
+| Download | `download/` package, `Client.Download`, CLI `download` | **removed** — `Client.resolveLinks` returns the CDN URLs instead |
+| Quality cap | 720p site / 480p guest / plan cap, enforced on download | none: every advertised quality is returned |
 | Configuration | functional `With*` options | a `ClientOptions` object |
 | Cancellation | `context.Context` | `AbortSignal` via `{ signal }` |
 | Errors | sentinel values + `errors.Is` | error classes + `isErrorOfType` (walks `cause`) |
@@ -190,24 +205,24 @@ Behavioural parity was the goal; these are the deliberate deviations.
 | Cookies | `net/http/cookiejar` | host-scoped `CookieJar` + manual redirect following |
 | Failure signalling | `(value, error)` tuples | thrown errors |
 | Maps | `map[int]Season` etc. | `Map<number, Season>` |
-| `Plan` | `int` iota with `String()` | string union (`'guest' | 'free' | 'pro' | 'pro_plus'`) |
-| CLI flags | stdlib `flag`: flags must precede positionals | `node:util.parseArgs`: order-independent, plus `--no-progress` |
+| `Plan` | `int` iota with `String()` | string union (`'guest' \| 'free' \| 'pro' \| 'pro_plus'`) |
+| CLI | `login`/`search`/`info`/`download`, stdlib `flag` (flags first) | `login`/`search`/`info`/`links`, `node:util.parseArgs` (order-independent) |
 | JSON decoding | struct tags, strict types | explicit decoders that also accept numeric strings |
 | `DeviceInfo` | duplicated public/internal structs | one exported interface |
 | Concurrency | mutexes and `sync.Once` | memoised promises (single-threaded runtime) |
 | Token redaction | `user_dev_token=%2A%2A%2A` | `user_dev_token=***` (URLSearchParams does not escape `*`) |
 | String sorting | UTF-8 byte order | UTF-16 code-unit order (identical for all BMP text) |
 
-Not ported: `WithHTTPClient`-style transport sharing with a pre-built client (pass `fetch`
-instead), and the Go module's `golang.org/x/term` dependency (the password prompt is implemented
-on `node:readline` and raw-mode stdin).
+Also dropped with the downloader: resumable transfers, `.part` files, progress reporting,
+destination derivation and the episode-range CLI flags (`--episodes`, `--output`). The Go
+module's `golang.org/x/term` dependency is replaced by a `node:readline` password prompt.
 
 ## Layout
 
 ```
 src/
   index.ts          public surface
-  filmix.ts         Client facade: bootstrap, auth, search, download orchestration
+  filmix.ts         Client facade: bootstrap, auth, search, link resolution
   options.ts        ClientOptions / defaults
   errors.ts         error classes + isErrorOfType
   logger.ts         Logger interface
@@ -215,7 +230,6 @@ src/
   client/           ApiClient, host discovery, livehash cache
   auth/             device-token flow, password flow, token stores
   site/             website path: player-data, #2 decoder, manifest playlist
-  download/         resumable streaming downloader
   internal/         HTTP plumbing, cookie jar, device id, timers
   cli/              the `filmix` command
 test/               vitest suites, fixtures shared with the Go repo's client/testdata

@@ -1,10 +1,8 @@
 /** CLI argument parsing and helpers (port of `cmd/filmix/*_test.go`). */
 import { describe, expect, it } from 'vitest';
 import { hostLooksLikeFilmix, parseIdArg, parseIdArgWithUrl } from '../src/cli/id.js';
-import { parseRange } from '../src/cli/ranges.js';
-import { buildSeriesJobs, discoverEpisodes, uniformQualities } from '../src/cli/commands.js';
-import { formatTable, humanBytes, renderBar } from '../src/cli/progress.js';
-import { Post } from '../src/models/post.js';
+import { printLinks, uniformQualities } from '../src/cli/commands.js';
+import { formatTable } from '../src/cli/table.js';
 
 describe('parseIdArg', () => {
   it.each([
@@ -46,103 +44,6 @@ describe('parseIdArg', () => {
   });
 });
 
-describe('parseRange', () => {
-  it.each([
-    ['empty', '', []],
-    ['whitespace', '   ', []],
-    ['single', '1', [1]],
-    ['hyphen range', '2-3', [2, 3]],
-    ['list', '1,3,5', [1, 3, 5]],
-    ['mixed', '1,3,7-9', [1, 3, 7, 8, 9]],
-    ['dedup', '1,1,2,2-3', [1, 2, 3]],
-    ['unordered', '5,1,3', [1, 3, 5]],
-    ['whitespace tokens', ' 1 , 3 - 4 ', [1, 3, 4]],
-    ['single element range', '4-4', [4]],
-  ])('%s', (_name, input, want) => {
-    expect(parseRange(input)).toEqual(want);
-  });
-
-  it.each([
-    ['trailing comma', '1,'],
-    ['leading comma', ',1'],
-    ['empty token', '1,,2'],
-    ['bad number', 'abc'],
-    ['reversed range', '5-3'],
-    ['zero', '0'],
-    ['negative', '-1'],
-    ['open low', '-3'],
-    ['open high', '3-'],
-    ['double dash', '1--3'],
-    ['non-numeric range', 'a-b'],
-    ['oversized range', '1-2147483647'],
-    ['oversized via list', '1,3-2000000'],
-  ])('%s throws', (_name, input) => {
-    expect(() => parseRange(input)).toThrow();
-  });
-});
-
-const seriesPost = (): Post =>
-  Post.fromJson({
-    id: 1,
-    section: 7,
-    player_links: {
-      playlist: {
-        '1': {
-          Dub: [
-            { link: 'https://cdn/s1e1_[720].mp4' },
-            { link: 'https://cdn/s1e2_[720].mp4' },
-          ],
-          Original: [{ link: 'https://cdn/s1e1_orig_[1080,720].mp4' }],
-        },
-        '2': {
-          Dub: [{ link: 'https://cdn/s2e1_[720].mp4' }],
-        },
-      },
-    },
-  });
-
-describe('buildSeriesJobs', () => {
-  it('expands the cross product when episodes are given', () => {
-    expect(buildSeriesJobs(seriesPost(), '', [1], [1, 2])).toEqual([
-      { season: 1, episode: 1 },
-      { season: 1, episode: 2 },
-    ]);
-  });
-
-  it('discovers every episode of each season when none are given', () => {
-    expect(buildSeriesJobs(seriesPost(), '', [1, 2], [])).toEqual([
-      { season: 1, episode: 1 },
-      { season: 1, episode: 2 },
-      { season: 2, episode: 1 },
-    ]);
-  });
-
-  it('defaults to season 1', () => {
-    expect(buildSeriesJobs(seriesPost(), 'Dub', [], [])).toEqual([
-      { season: 1, episode: 1 },
-      { season: 1, episode: 2 },
-    ]);
-  });
-
-  it('honours an explicit translation', () => {
-    expect(buildSeriesJobs(seriesPost(), 'Original', [1], [])).toEqual([
-      { season: 1, episode: 1 },
-    ]);
-  });
-
-  it('throws when a season has no episodes', () => {
-    expect(() => buildSeriesJobs(seriesPost(), '', [9], [])).toThrow(/no episodes found/);
-  });
-});
-
-describe('discoverEpisodes', () => {
-  it('falls back to the first translation that has the season', () => {
-    expect(discoverEpisodes(seriesPost(), 2, '')).toEqual([1]);
-    expect(discoverEpisodes(seriesPost(), 2, 'Original')).toEqual([]);
-    expect(discoverEpisodes(seriesPost(), 7, '')).toEqual([]);
-  });
-});
-
 describe('uniformQualities', () => {
   it('returns the shared sorted set, or undefined when they differ', () => {
     expect(uniformQualities([])).toEqual([]);
@@ -161,21 +62,54 @@ describe('uniformQualities', () => {
   });
 });
 
-describe('progress formatting', () => {
-  it('renders byte sizes like the Go CLI', () => {
-    expect(humanBytes(512)).toBe('512 B');
-    expect(humanBytes(2048)).toBe('2.0 KiB');
-    expect(humanBytes(5 * 1024 * 1024)).toBe('5.0 MiB');
-    expect(humanBytes(3 * 1024 ** 3)).toBe('3.0 GiB');
+describe('printLinks', () => {
+  it('prints one block per translation, highest quality first', () => {
+    const lines: string[] = [];
+    const original = console.log;
+    console.log = (...args: unknown[]) => void lines.push(args.map(String).join(' '));
+    try {
+      printLinks(
+        {
+          source: 'site',
+          translations: [
+            {
+              translation: 'Dub',
+              urls: new Map([
+                [720, 'https://cdn/a_720.mp4'],
+                [1080, 'https://cdn/a_1080.mp4'],
+              ]),
+            },
+          ],
+        },
+        { season: 2, episode: 3 },
+      );
+    } finally {
+      console.log = original;
+    }
+    const out = lines.join('\n');
+    expect(out).toContain('CDN links for S02E03 (site: decoded from the website manifests)');
+    expect(out.indexOf('1080p')).toBeLessThan(out.indexOf('720p'));
+    expect(out).toContain('https://cdn/a_1080.mp4');
+    // The preview warning belongs to the mobile path only.
+    expect(out).not.toContain('short previews');
   });
 
-  it('renders a fixed-width bar', () => {
-    expect(renderBar(0, 10)).toBe(' '.repeat(10));
-    expect(renderBar(50, 10)).toBe('#####     ');
-    expect(renderBar(100, 10)).toBe('#'.repeat(10));
-    expect(renderBar(150, 10)).toBe('#'.repeat(10));
+  it('warns about previews on the mobile path and handles an empty result', () => {
+    const lines: string[] = [];
+    const original = console.log;
+    console.log = (...args: unknown[]) => void lines.push(args.map(String).join(' '));
+    try {
+      printLinks({ source: 'mobile', translations: [] });
+    } finally {
+      console.log = original;
+    }
+    const out = lines.join('\n');
+    expect(out).toContain('(none resolved)');
+    expect(out).toContain('derived from the mobile API templates');
   });
+});
 
+describe('table formatting', () => {
   it('aligns table columns', () => {
     const out = formatTable([
       ['ID', 'TITLE'],

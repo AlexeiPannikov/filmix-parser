@@ -1,13 +1,9 @@
-import { mkdir, stat } from 'node:fs/promises';
-import path from 'node:path';
 import { parseArgs } from 'node:util';
 
-import type { Client } from '../filmix.js';
-import type { Episode, Post } from '../models/post.js';
-import type { ProgressFunc } from '../download/downloader.js';
-import { parseIdArg, parseIdArgWithUrl } from './id.js';
-import { parseRange } from './ranges.js';
-import { formatTable, newProgressBar } from './progress.js';
+import type { Client, ResolvedLinks } from '../filmix.js';
+import type { Episode } from '../models/post.js';
+import { parseIdArgWithUrl } from './id.js';
+import { formatTable } from './table.js';
 import { readPassword } from './prompt.js';
 
 export interface CommandContext {
@@ -48,12 +44,34 @@ export async function cmdSearch(ctx: CommandContext, args: string[]): Promise<vo
 /* -------------------------------------------------------------------- info */
 
 export async function cmdInfo(ctx: CommandContext, args: string[]): Promise<void> {
-  const { positionals } = parseArgs({ args, allowPositionals: true, strict: true });
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    strict: true,
+    options: {
+      season: { type: 'string', default: '1' },
+      episode: { type: 'string', default: '1' },
+      translation: { type: 'string', default: '' },
+      links: { type: 'boolean', default: true },
+      'no-links': { type: 'boolean', default: false },
+      user: { type: 'string', default: '' },
+      password: { type: 'string', default: '' },
+    },
+  });
   if (positionals.length !== 1 || positionals[0] === undefined) {
-    process.stderr.write('Usage: filmix info <id|url>\n');
+    process.stderr.write('Usage: filmix info [flags] <id|url>\n');
     throw new Error('expected exactly one id or url argument');
   }
-  const id = parseIdArg(positionals[0]);
+
+  const [user, password] = resolveCredentials(values.user ?? '', values.password ?? '');
+  if (user !== '') await loginByPassword(ctx, user, password);
+
+  const { id, sourceUrl } = parseIdArgWithUrl(positionals[0]);
+  const season = parsePositiveInt(values.season ?? '1', '--season');
+  const episode = parsePositiveInt(values.episode ?? '1', '--episode');
+  const translation = values.translation ?? '';
+  const showLinks = (values.links ?? true) && !(values['no-links'] ?? false);
+
   const post = await ctx.client.getPost(id, { signal: ctx.signal });
 
   console.log(`ID:        ${post.id}`);
@@ -67,29 +85,84 @@ export async function cmdInfo(ctx: CommandContext, args: string[]): Promise<void
     for (const m of post.playerLinks.movie) {
       console.log(`  - ${m.translation}  qualities=[${m.qualities.join(' ')}]`);
     }
-    return;
-  }
-
-  console.log('Type:      series');
-  for (const season of post.seasons()) {
-    const s = post.playerLinks.playlist.get(season);
-    if (s === undefined) continue;
-    console.log(`Season ${season}:`);
-    for (const name of [...s.translations.keys()].sort()) {
-      const episodes = s.translations.get(name) ?? [];
-      const uniform = uniformQualities(episodes);
-      if (uniform !== undefined) {
-        console.log(
-          `  Translation: ${name} (${episodes.length} episodes) qualities=[${uniform.join(' ')}]`,
-        );
-        continue;
-      }
-      console.log(`  Translation: ${name} (${episodes.length} episodes)`);
-      for (const ep of episodes) {
-        console.log(`    E${String(ep.number).padStart(2, '0')}  qualities=[${ep.qualities.join(' ')}]`);
+  } else {
+    console.log('Type:      series');
+    for (const s of post.seasons()) {
+      const seasonData = post.playerLinks.playlist.get(s);
+      if (seasonData === undefined) continue;
+      console.log(`Season ${s}:`);
+      for (const name of [...seasonData.translations.keys()].sort()) {
+        const episodes = seasonData.translations.get(name) ?? [];
+        const uniform = uniformQualities(episodes);
+        if (uniform !== undefined) {
+          console.log(
+            `  Translation: ${name} (${episodes.length} episodes) qualities=[${uniform.join(' ')}]`,
+          );
+          continue;
+        }
+        console.log(`  Translation: ${name} (${episodes.length} episodes)`);
+        for (const ep of episodes) {
+          console.log(
+            `    E${String(ep.number).padStart(2, '0')}  qualities=[${ep.qualities.join(' ')}]`,
+          );
+        }
       }
     }
   }
+
+  if (!showLinks) return;
+
+  const links = await ctx.client.resolveLinks({
+    post,
+    season,
+    episode,
+    translation,
+    sourceUrl,
+    signal: ctx.signal,
+  });
+  printLinks(links, post.isSeries() ? { season, episode } : undefined);
+}
+
+/** Prints the resolved CDN URLs, highest quality first. */
+export function printLinks(
+  links: ResolvedLinks,
+  episodeRef?: { season: number; episode: number },
+): void {
+  const scope =
+    episodeRef === undefined
+      ? ''
+      : ` for S${String(episodeRef.season).padStart(2, '0')}E${String(episodeRef.episode).padStart(2, '0')}`;
+  const origin =
+    links.source === 'site'
+      ? 'decoded from the website manifests'
+      : 'derived from the mobile API templates';
+  console.log();
+  console.log(`CDN links${scope} (${links.source}: ${origin}):`);
+  if (links.translations.length === 0) {
+    console.log('  (none resolved)');
+    return;
+  }
+  for (const t of links.translations) {
+    console.log(`  ${t.translation}`);
+    const rows = [...t.urls.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(([quality, url]) => [`    ${quality}p`, url]);
+    console.log(formatTable(rows));
+  }
+  if (links.source === 'mobile') {
+    console.log();
+    console.log(
+      '  Note: without a device token or a site session the CDN serves short previews above ~480p.',
+    );
+    console.log('  Pass --user/--password to resolve the links through the website session.');
+  }
+}
+
+function parsePositiveInt(raw: string, flag: string): number {
+  if (!/^\d+$/.test(raw.trim())) throw new Error(`${flag}: expected a positive integer`);
+  const n = Number.parseInt(raw, 10);
+  if (n < 1) throw new Error(`${flag}: expected a positive integer`);
+  return n;
 }
 
 /**
@@ -104,6 +177,51 @@ export function uniformQualities(episodes: readonly Episode[]): number[] | undef
     if (cur.length !== ref.length || cur.some((q, i) => q !== ref[i])) return undefined;
   }
   return ref;
+}
+
+/* ------------------------------------------------------------------- links */
+
+/** `filmix links <id|url>` — just the CDN URLs, without the metadata header. */
+export async function cmdLinks(ctx: CommandContext, args: string[]): Promise<void> {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    strict: true,
+    options: {
+      season: { type: 'string', default: '1' },
+      episode: { type: 'string', default: '1' },
+      translation: { type: 'string', default: '' },
+      user: { type: 'string', default: '' },
+      password: { type: 'string', default: '' },
+    },
+  });
+  if (positionals.length !== 1 || positionals[0] === undefined) {
+    process.stderr.write('Usage: filmix links [flags] <id|url>\n');
+    throw new Error('expected exactly one id or url argument');
+  }
+
+  const [user, password] = resolveCredentials(values.user ?? '', values.password ?? '');
+  if (user !== '') await loginByPassword(ctx, user, password);
+
+  const { id, sourceUrl } = parseIdArgWithUrl(positionals[0]);
+  const post = await ctx.client.getPost(id, { signal: ctx.signal });
+  const links = await ctx.client.resolveLinks({
+    post,
+    season: parsePositiveInt(values.season ?? '1', '--season'),
+    episode: parsePositiveInt(values.episode ?? '1', '--episode'),
+    translation: values.translation ?? '',
+    sourceUrl,
+    signal: ctx.signal,
+  });
+  printLinks(
+    links,
+    post.isSeries()
+      ? {
+          season: parsePositiveInt(values.season ?? '1', '--season'),
+          episode: parsePositiveInt(values.episode ?? '1', '--episode'),
+        }
+      : undefined,
+  );
 }
 
 /* ------------------------------------------------------------------- login */
@@ -152,9 +270,6 @@ export async function loginByPassword(
 
   await ctx.client.loginByPassword(user, password, { signal: ctx.signal });
   console.log('Site session established and saved (will be reused by future commands).');
-  console.log();
-  console.log('Quality cap with site session: 720p by default (Free tier).');
-  console.log('Pass --quality 1080 explicitly if your account has a Pro subscription.');
 }
 
 async function loginByDeviceFlow(ctx: CommandContext): Promise<void> {
@@ -177,222 +292,4 @@ async function loginByDeviceFlow(ctx: CommandContext): Promise<void> {
   } catch {
     // Profile is a nicety; activation already succeeded.
   }
-}
-
-/* ---------------------------------------------------------------- download */
-
-export async function cmdDownload(ctx: CommandContext, args: string[]): Promise<void> {
-  const { values, positionals } = parseArgs({
-    args,
-    allowPositionals: true,
-    strict: true,
-    options: {
-      translation: { type: 'string', default: '' },
-      season: { type: 'string', default: '1' },
-      episodes: { type: 'string', default: '' },
-      quality: { type: 'string', default: '0' },
-      output: { type: 'string', default: '' },
-      progress: { type: 'boolean', default: true },
-      'no-progress': { type: 'boolean', default: false },
-      user: { type: 'string', default: '' },
-      password: { type: 'string', default: '' },
-    },
-  });
-
-  const [user, password] = resolveCredentials(values.user ?? '', values.password ?? '');
-  if (user !== '') await loginByPassword(ctx, user, password);
-
-  if (positionals.length !== 1 || positionals[0] === undefined) {
-    process.stderr.write('Usage: filmix download [flags] <id|url>\n');
-    throw new Error('expected exactly one id or url argument');
-  }
-  const { id, sourceUrl } = parseIdArgWithUrl(positionals[0]);
-  const quality = Number.parseInt(values.quality ?? '0', 10);
-  if (Number.isNaN(quality)) throw new Error('--quality: expected a number');
-  const translation = values.translation ?? '';
-  const output = values.output ?? '';
-
-  const post = await ctx.client.getPost(id, { signal: ctx.signal });
-
-  const seasons = parseRange(values.season ?? '1');
-  const episodes = parseRange(values.episodes ?? '');
-  if (seasons.length > 1 && episodes.length > 1) {
-    throw new Error('--episodes with multiple values requires a single --season');
-  }
-
-  const showProgress = (values.progress ?? true) && !(values['no-progress'] ?? false);
-  const progress = showProgress ? newProgressBar() : undefined;
-
-  if (!post.isSeries()) {
-    await runDownload(ctx, {
-      post,
-      translation,
-      quality,
-      output,
-      sourceUrl,
-      ...(progress ? { progress } : {}),
-    });
-    return;
-  }
-
-  const jobs = buildSeriesJobs(post, translation, seasons, episodes);
-  if (jobs.length === 0) {
-    throw new Error('no episodes match the requested season/episode range');
-  }
-  const multi = jobs.length > 1;
-
-  let outDir = '';
-  let outFile = '';
-  if (multi) {
-    outDir = output;
-    if (outDir !== '') await ensureDir(outDir);
-  } else {
-    outFile = output;
-  }
-
-  for (const [i, job] of jobs.entries()) {
-    if (multi) {
-      const s = String(job.season).padStart(2, '0');
-      const e = String(job.episode).padStart(2, '0');
-      console.log(`[${i + 1}/${jobs.length}] S${s}E${e}`);
-    }
-    try {
-      await runDownload(ctx, {
-        post,
-        translation,
-        season: job.season,
-        episode: job.episode,
-        quality,
-        output: outFile,
-        outDir,
-        sourceUrl,
-        ...(progress ? { progress } : {}),
-      });
-    } catch (err) {
-      const s = String(job.season).padStart(2, '0');
-      const e = String(job.episode).padStart(2, '0');
-      throw new Error(`S${s}E${e}: ${err instanceof Error ? err.message : String(err)}`, {
-        cause: err,
-      });
-    }
-  }
-}
-
-export interface SeriesJob {
-  season: number;
-  episode: number;
-}
-
-/**
- * Expands the requested season/episode ranges into concrete (season, episode)
- * pairs.
- *
- * When `episodes` is non-empty the cross product is returned (a multi-value
- * cross product is rejected upstream — only one dimension may be a true range).
- * When it is empty, each season's full episode list is discovered from the post
- * metadata, using `translation` when set, else the alphabetically first
- * translation that has the season.
- */
-export function buildSeriesJobs(
-  post: Post,
-  translation: string,
-  seasonsIn: readonly number[],
-  episodes: readonly number[],
-): SeriesJob[] {
-  const seasons = seasonsIn.length > 0 ? seasonsIn : [1];
-
-  if (episodes.length > 0) {
-    const jobs: SeriesJob[] = [];
-    for (const season of seasons) {
-      for (const episode of episodes) jobs.push({ season, episode });
-    }
-    return jobs;
-  }
-
-  const jobs: SeriesJob[] = [];
-  for (const season of seasons) {
-    const eps = discoverEpisodes(post, season, translation);
-    if (eps.length === 0) throw new Error(`no episodes found for season ${season}`);
-    for (const episode of eps) jobs.push({ season, episode });
-  }
-  return jobs;
-}
-
-/**
- * The episode numbers available for `season`. With `translation` set only that
- * translation is consulted; otherwise the first translation (alphabetically)
- * that actually has the season is used.
- */
-export function discoverEpisodes(post: Post, season: number, translation: string): number[] {
-  const s = post.playerLinks.playlist.get(season);
-  if (s === undefined) return [];
-  const names = translation === '' ? post.translations() : [translation];
-  for (const name of names) {
-    if (name === '') continue;
-    const eps = s.translations.get(name);
-    if (eps === undefined || eps.length === 0) continue;
-    return eps.map((e) => e.number);
-  }
-  return [];
-}
-
-interface DownloadParams {
-  post: Post;
-  translation: string;
-  season?: number;
-  episode?: number;
-  quality: number;
-  /** Exact destination when a single file. */
-  output: string;
-  /** Destination directory when downloading many files. */
-  outDir?: string;
-  sourceUrl: string;
-  progress?: ProgressFunc;
-}
-
-/**
- * Performs one download. The filename is derived from the resolved CDN URL by
- * the library unless `output` is a literal file path; when `outDir` is set, the
- * library writes inside it.
- */
-async function runDownload(ctx: CommandContext, p: DownloadParams): Promise<void> {
-  const dst = p.outDir !== undefined && p.outDir !== '' ? p.outDir + path.sep : p.output;
-
-  try {
-    await ctx.client.download({
-      post: p.post,
-      translation: p.translation,
-      quality: p.quality,
-      destination: dst,
-      sourceUrl: p.sourceUrl,
-      ...(p.progress ? { progress: p.progress } : {}),
-      ...(p.post.isSeries() ? { season: p.season ?? 0, episode: p.episode ?? 0 } : {}),
-      signal: ctx.signal,
-    });
-  } catch (err) {
-    console.log();
-    throw new Error(`download: ${err instanceof Error ? err.message : String(err)}`, {
-      cause: err,
-    });
-  }
-  if (dst === '' || dst.endsWith(path.sep)) {
-    // The library derived the actual path; the chosen name is logged as
-    // filmix.download.start dest=...
-    console.log('\nDone.');
-  } else {
-    console.log(`\nDone: ${dst}`);
-  }
-}
-
-async function ensureDir(dir: string): Promise<void> {
-  try {
-    const info = await stat(dir);
-    if (!info.isDirectory()) {
-      throw new Error(`--output ${JSON.stringify(dir)} exists and is not a directory`);
-    }
-    return;
-  } catch (err) {
-    if (!(err instanceof Error && 'code' in err && err.code === 'ENOENT')) throw err;
-  }
-  await mkdir(dir, { recursive: true, mode: 0o755 });
 }
