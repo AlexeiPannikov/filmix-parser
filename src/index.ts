@@ -61,6 +61,7 @@ export {
   encodeForTesting,
   parsePlaylist,
   parseFileField,
+  qualityFromUrl,
   labelToQuality,
   guessSeasonNumber,
   parsePlayerDataJson,

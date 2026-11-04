@@ -6,6 +6,7 @@ export {
   PlaylistFile,
   parsePlaylist,
   parseFileField,
+  qualityFromUrl,
   labelToQuality,
   guessSeasonNumber,
 } from './playlist.js';

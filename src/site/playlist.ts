@@ -50,6 +50,12 @@ const QUALITY_FILE_RE = /\[([^\]]+)\]([^,[]+)/g;
 const DIGITS_RE = /\d+/;
 
 /**
+ * The pixel height Filmix encodes into the file name itself
+ * (`…BDRip.2160p.rus_720.mp4`, optionally followed by a query string).
+ */
+const FILENAME_QUALITY_RE = /_(\d{3,4})\.mp4(?:\?[^,]*)?$/;
+
+/**
  * Maps a bracket label to its pixel-height equivalent. Anything containing `4K`
  * or `UHD` resolves to 2160; otherwise the first numeric run is used as-is
  * (`1080p` → 1080, `720` → 720).
@@ -66,8 +72,23 @@ export function labelToQuality(label: string): number | undefined {
 }
 
 /**
+ * The height encoded in the URL's own file name, when it looks like a sane
+ * video height. Preferred over the bracket label because labels collide: a
+ * file field carrying both `[1080p]` and `[1080p Ultra+]` maps both to 1080
+ * through {@link labelToQuality}, and the second entry would silently drop the
+ * first. The file names (`…_1080.mp4` and `…_1440.mp4`) keep them apart.
+ */
+export function qualityFromUrl(url: string): number | undefined {
+  const m = FILENAME_QUALITY_RE.exec(url.trim());
+  if (m?.[1] === undefined) return undefined;
+  const n = Number.parseInt(m[1], 10);
+  return n >= 100 && n <= 4320 ? n : undefined;
+}
+
+/**
  * Parses the comma-separated quality/URL pairs found in the `file` property of
- * a manifest entry.
+ * a manifest entry. The height comes from the URL's file name when it carries
+ * one, and from the bracket label otherwise.
  */
 export function parseFileField(raw: string): Map<number, string> {
   const out = new Map<number, string>();
@@ -75,7 +96,7 @@ export function parseFileField(raw: string): Map<number, string> {
     const label = m[1];
     const url = m[2];
     if (label === undefined || url === undefined) continue;
-    const quality = labelToQuality(label);
+    const quality = qualityFromUrl(url) ?? labelToQuality(label);
     if (quality === undefined) continue;
     out.set(quality, url.trim());
   }

@@ -52,13 +52,19 @@ await client.resolveLinks({ post, source: 'mobile' }); // ignore the website ses
 With `'auto'` (the default) a website-path failure silently downgrades to the mobile API;
 `'site'` raises the underlying error instead, which is what you want while debugging.
 
-**Content gating.** Resolved URLs are always well-formed and return `200`, but without
-authorization the CDN serves a placeholder clip instead of the content — at *every* quality,
-480p included. Measured on 2026-11-04: three different translations of one post returned
-byte-identical placeholder files whose `Content-Length` and MP4 structure look entirely
-plausible, so the substitution is not detectable from the headers. The upstream Go client
-behaves identically, so this is a server-side gate keyed on the device token, not a client
-issue.
+**Content gating lives in the URL signature.** Resolved URLs are always well-formed, and the
+host, directory and file name are identical whoever asks — only the `/s/<signature>/` segment
+differs, and the CDN decides what to serve from it. Measured on 2026-11-04 against one post,
+same file name throughout:
+
+| Signed for | 480p / 720p | 1080p and above |
+| --- | --- | --- |
+| a guest (no token, no session) | placeholder clip, or `502` | placeholder clip |
+| a Free website session | the real file (~86 min) | identical ~13 s placeholder on every host |
+
+The placeholders carry an honest `Content-Length` and a valid MP4 structure, so they are not
+detectable from the headers — only the bytes or the `mvhd` duration give them away. The upstream
+Go client behaves identically, so this is a server-side gate, not a client issue.
 
 Every method takes an optional `{ signal }` — the `context.Context` equivalent.
 
@@ -69,12 +75,28 @@ filmix search "Матрица"
 filmix info <id|url>                  # metadata + CDN links
 filmix links <id|url>                 # just the CDN links
 filmix login --user X --password Y     # website session (or bare `login` for the device flow)
+filmix session import --cookies c.json # reuse cookies captured elsewhere
 FILMIX_DEBUG=1 filmix ...              # verbose logging
 ```
 
 `info` / `links` flags: `--season <n>`, `--episode <n>` (series, default S1E1),
 `--translation <name>`, `--source auto|site|mobile`, `--no-links` (`info` only),
-`--user` / `--password` (also `FILMIX_USER` / `FILMIX_PASS`).
+`--user` / `--password` (also `FILMIX_USER` / `FILMIX_PASS`). `FILMIX_MIRROR`
+overrides the site mirror for every command.
+
+### Importing a session you already have
+
+When the password POST is awkward — anti-bot in the way, or the session already
+exists in a browser — hand the cookies over directly:
+
+```bash
+filmix session import --cookies cookies.json [--mirror https://filmix.gg]
+filmix links 186525 --source site
+```
+
+The file may be a `Cookie:` header line (`a=b; c=d`), a `{"name": "value"}` object, or a
+browser-extension export (`[{"name": …, "value": …}, …]`; extra fields are ignored). Cookies go
+through a file rather than a flag so they stay out of the shell history and the process list.
 
 ```
 $ filmix info 154246

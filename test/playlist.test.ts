@@ -4,6 +4,7 @@ import {
   labelToQuality,
   parseFileField,
   parsePlaylist,
+  qualityFromUrl,
 } from '../src/site/playlist.js';
 import { parsePlayerDataJson } from '../src/site/player-data.js';
 import { ContentLockedError, DecodeError, PlayerDataEmptyError } from '../src/errors.js';
@@ -38,6 +39,49 @@ describe('parseFileField', () => {
 
   it('skips unrecognised labels', () => {
     expect(parseFileField('[HD]https://cdn/x.mp4').size).toBe(0);
+  });
+
+  /**
+   * Real field from post 186525: `[1080p]` and `[1080p Ultra+]` both start with
+   * 1080, so a label-only mapping collapsed them into one key and dropped the
+   * genuine 1080p entry. The file names keep them apart.
+   */
+  it('keeps [1080p] and [1080p Ultra+] apart via the file name', () => {
+    const got = parseFileField(
+      '[480p]https://cdn/HD_45/Beguschaya.2026_480.mp4,' +
+        '[720p]https://cdn/HD_45/Beguschaya.2026_720.mp4,' +
+        '[1080p]https://cdn/HD_45/Beguschaya.2026_1080.mp4,' +
+        '[1080p Ultra+]https://cdn/HD_45/Beguschaya.2026_1440.mp4,' +
+        '[4K UHD]https://cdn/HD_45/Beguschaya.2026_2160.mp4',
+    );
+    expect([...got.keys()].sort((a, b) => a - b)).toEqual([480, 720, 1080, 1440, 2160]);
+    expect(got.get(1080)).toBe('https://cdn/HD_45/Beguschaya.2026_1080.mp4');
+    expect(got.get(1440)).toBe('https://cdn/HD_45/Beguschaya.2026_1440.mp4');
+  });
+
+  it('trusts the file name over a misleading label', () => {
+    // The release name carries 2160p, the actual rendition is 480p.
+    const got = parseFileField('[480p]https://cdn/The.Runner.2026.2160p.SDR-HDrezka_480.mp4');
+    expect([...got.keys()]).toEqual([480]);
+  });
+
+  it('keeps a query string out of the way', () => {
+    const got = parseFileField('[720p]https://cdn/s02e05_720.mp4?vs3-origin');
+    expect(got.get(720)).toBe('https://cdn/s02e05_720.mp4?vs3-origin');
+  });
+});
+
+describe('qualityFromUrl', () => {
+  it.each([
+    ['https://cdn/a_480.mp4', 480],
+    ['https://cdn/a_2160.mp4', 2160],
+    ['https://cdn/a_720.mp4?vs3-origin', 720],
+    ['https://cdn/The.Runner.2026.2160p.SDR-HDrezka_1080.mp4', 1080],
+    ['https://cdn/a.mp4', undefined],
+    ['https://cdn/part_2.mp4', undefined],
+    ['https://cdn/a_99999.mp4', undefined],
+  ])('qualityFromUrl(%j) === %j', (url, want) => {
+    expect(qualityFromUrl(url)).toBe(want);
   });
 });
 

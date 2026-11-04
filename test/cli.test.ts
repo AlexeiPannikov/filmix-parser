@@ -106,8 +106,9 @@ describe('printLinks', () => {
     expect(out).toContain('CDN links for S02E03 (site: decoded from the website manifests)');
     expect(out.indexOf('1080p')).toBeLessThan(out.indexOf('720p'));
     expect(out).toContain('https://cdn/a_1080.mp4');
-    // The preview warning belongs to the mobile path only.
-    expect(out).not.toContain('short previews');
+    // The site note states the Free ceiling; the guest warning is mobile-only.
+    expect(out).toContain('only up to 720p');
+    expect(out).not.toContain('signed for a guest');
   });
 
   it('warns about previews on the mobile path and handles an empty result', () => {
@@ -122,6 +123,8 @@ describe('printLinks', () => {
     const out = lines.join('\n');
     expect(out).toContain('(none resolved)');
     expect(out).toContain('derived from the mobile API templates');
+    expect(out).toContain('signed for a guest');
+    expect(out).toContain('session import');
   });
 });
 

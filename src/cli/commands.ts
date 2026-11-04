@@ -1,13 +1,17 @@
+import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 
+import type { SiteCookie, TokenStore } from '../auth/store.js';
 import type { Client, ResolvedLinks, ResolveSource } from '../filmix.js';
 import type { Episode } from '../models/post.js';
+import { isRecord } from '../models/json.js';
 import { parseIdArgWithUrl } from './id.js';
 import { formatTable } from './table.js';
 import { readPassword } from './prompt.js';
 
 export interface CommandContext {
   client: Client;
+  store: TokenStore;
   signal: AbortSignal;
 }
 
@@ -142,8 +146,9 @@ export function printLinks(
   console.log();
   console.log(`CDN links${scope} (${links.source}: ${origin}):`);
   if (links.translations.length === 0) {
+    // Still print the note below: "nothing resolved" is exactly when the
+    // reason matters most.
     console.log('  (none resolved)');
-    return;
   }
   for (const t of links.translations) {
     console.log(`  ${t.translation}`);
@@ -152,13 +157,16 @@ export function printLinks(
       .map(([quality, url]) => [`    ${quality}p`, url]);
     console.log(formatTable(rows));
   }
+  console.log();
   if (links.source === 'mobile') {
-    console.log();
-    console.log(
-      '  Note: without a device token or a site session the CDN serves a placeholder clip',
-    );
-    console.log('  instead of the content, at every quality.');
-    console.log('  Pass --user/--password to resolve the links through the website session.');
+    console.log('  Note: these URLs are signed for a guest. Without a device token or a');
+    console.log('  website session the CDN answers with a placeholder clip (or an error)');
+    console.log('  at every quality, 480p included.');
+    console.log('  Authorize first: `filmix login`, `filmix login --user X --password Y`,');
+    console.log('  or `filmix session import --cookies cookies.json`.');
+  } else {
+    console.log('  Note: a Free account gets the real file only up to 720p; above that the');
+    console.log('  CDN substitutes a ~13-second placeholder. Pro/Pro+ raise that ceiling.');
   }
 }
 
@@ -235,6 +243,85 @@ export async function cmdLinks(ctx: CommandContext, args: string[]): Promise<voi
         }
       : undefined,
   );
+}
+
+/* ----------------------------------------------------------------- session */
+
+/**
+ * `filmix session import` — installs website cookies captured elsewhere (browser
+ * devtools, a crawler running your own login) as the site session, so the
+ * website path can be used without re-running the password flow.
+ */
+export async function cmdSession(ctx: CommandContext, args: string[]): Promise<void> {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    strict: true,
+    options: {
+      cookies: { type: 'string', default: '' },
+      mirror: { type: 'string', default: '' },
+    },
+  });
+  const sub = positionals[0] ?? '';
+  if (sub !== 'import') {
+    process.stderr.write('Usage: filmix session import --cookies <file> [--mirror <url>]\n');
+    throw new Error(`unknown session subcommand ${JSON.stringify(sub)}`);
+  }
+  const file = values.cookies ?? '';
+  if (file === '') throw new Error('--cookies: path to a cookie file is required');
+
+  const cookies = parseCookieFile(await readFile(file, 'utf8'));
+  if (cookies.length === 0) throw new Error(`no cookies found in ${JSON.stringify(file)}`);
+
+  const mirror = values.mirror !== undefined && values.mirror !== '' ? values.mirror : ctx.client.mirror;
+  const state = await ctx.store.load();
+  state.siteSession = { mirror: mirror.replace(/\/+$/, ''), cookies };
+  await ctx.store.save(state);
+
+  console.log(`Imported ${cookies.length} cookie(s) for ${mirror}: ${cookies.map((c) => c.name).join(', ')}`);
+  console.log('The website path is now available — try: filmix links <id> --source site');
+}
+
+/**
+ * Accepts the three shapes a cookie dump realistically comes in:
+ *
+ * - a `Cookie:` header value — `a=b; c=d`
+ * - a JSON object — `{"a": "b"}`
+ * - a JSON array of `{name, value}` (what browser extensions export; extra
+ *   fields such as `domain` or `expirationDate` are ignored)
+ */
+export function parseCookieFile(raw: string): SiteCookie[] {
+  const text = raw.trim();
+  if (text === '') return [];
+
+  if (text.startsWith('{') || text.startsWith('[')) {
+    const parsed: unknown = JSON.parse(text);
+    if (Array.isArray(parsed)) {
+      return parsed.flatMap((entry) => {
+        if (!isRecord(entry)) return [];
+        const name = typeof entry['name'] === 'string' ? entry['name'] : '';
+        const value = typeof entry['value'] === 'string' ? entry['value'] : '';
+        return name === '' ? [] : [{ name, value }];
+      });
+    }
+    if (isRecord(parsed)) {
+      return Object.entries(parsed).flatMap(([name, value]) =>
+        typeof value === 'string' ? [{ name, value }] : [],
+      );
+    }
+    return [];
+  }
+
+  // Cookie header form, with or without the leading "Cookie:".
+  return text
+    .replace(/^\s*cookie\s*:/i, '')
+    .split(';')
+    .flatMap((pair) => {
+      const eq = pair.indexOf('=');
+      if (eq <= 0) return [];
+      const name = pair.slice(0, eq).trim();
+      return name === '' ? [] : [{ name, value: pair.slice(eq + 1).trim() }];
+    });
 }
 
 /* ------------------------------------------------------------------- login */

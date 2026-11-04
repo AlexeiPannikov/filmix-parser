@@ -12,7 +12,14 @@
  */
 import { Client } from '../filmix.js';
 import { consoleLogger } from '../logger.js';
-import { cmdInfo, cmdLinks, cmdLogin, cmdSearch, type CommandContext } from './commands.js';
+import {
+  cmdInfo,
+  cmdLinks,
+  cmdLogin,
+  cmdSearch,
+  cmdSession,
+  type CommandContext,
+} from './commands.js';
 import { FileStore } from './config-store.js';
 
 const USAGE = `Usage: filmix <command> [args]
@@ -22,6 +29,10 @@ Commands:
   search <query>       Search posts by title.
   info <id|url>        Print details (translations, seasons, qualities) and the CDN links.
   links <id|url>       Print only the resolved CDN links, one block per translation.
+  session import       Install website cookies captured elsewhere as the site session:
+                         filmix session import --cookies cookies.json [--mirror <url>]
+                       The file may hold a Cookie header line, a {"name":"value"} object,
+                       or a browser-extension export ([{"name":…,"value":…}, …]).
 
 <id|url> can be either a numeric post id (e.g. 184075) or a Filmix page URL
 (e.g. https://filmix.gg/film/triller/184075-v-normal-2025.html).
@@ -38,7 +49,8 @@ info / links flags:
                         with a site session the links are decoded from the
                         website manifests instead of the mobile API templates.
 
-Set FILMIX_DEBUG=1 for verbose logging.`;
+Set FILMIX_DEBUG=1 for verbose logging and FILMIX_MIRROR to override the site mirror
+(default https://filmix.gg).`;
 
 export async function main(argv: readonly string[]): Promise<number> {
   const command = argv[0];
@@ -60,9 +72,11 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
 
   const debug = (process.env['FILMIX_DEBUG'] ?? '') !== '';
+  const mirror = process.env['FILMIX_MIRROR'] ?? '';
   const client = new Client({
     tokenStore: store,
     logger: consoleLogger(debug ? 'debug' : 'info'),
+    ...(mirror !== '' ? { mirror } : {}),
   });
 
   const controller = new AbortController();
@@ -70,7 +84,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   process.on('SIGINT', onSignal);
   process.on('SIGTERM', onSignal);
 
-  const ctx: CommandContext = { client, signal: controller.signal };
+  const ctx: CommandContext = { client, store, signal: controller.signal };
   const args = [...argv.slice(1)];
 
   try {
@@ -86,6 +100,9 @@ export async function main(argv: readonly string[]): Promise<number> {
         break;
       case 'links':
         await cmdLinks(ctx, args);
+        break;
+      case 'session':
+        await cmdSession(ctx, args);
         break;
       default:
         process.stderr.write(`unknown command: ${command}\n`);
